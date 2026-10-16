@@ -1,101 +1,108 @@
 # LinguaNex
 
+![GitHub Release](https://img.shields.io/github/v/release/YOUNG-FELIX/Obsidian-LinguaNex-plugin?style=flat)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Obsidian](https://img.shields.io/badge/Obsidian-1.4.0%2B-7c3aed?logo=obsidian&logoColor=white)
+![Downloads](https://img.shields.io/github/downloads/YOUNG-FELIX/Obsidian-LinguaNex-plugin/total?style=flat)
+
 [English](#english) | [中文](#中文)
 
 ---
 
 ## English
 
-Look up words in local MDX/MDD dictionaries, build vocabulary lists, and review them with spaced repetition — on desktop and mobile.
+LinguaNex brings a dictionary into Obsidian. It reads the MDX/MDD dictionaries you already have — the format MDict and GoldenDict use, and the one most Chinese–English dictionary packs ship in — so you can look a word up without leaving your note, and without a network connection. When the built-in sources aren't enough, you can add online dictionaries, sentence translation, or an AI model for a fuller explanation.
 
-LinguaNex is a privacy-first dictionary plugin for [Obsidian](https://obsidian.md/). It reads your own `.mdx` / `.mdd` dictionary files (the standard format used by MDict / GoldenDict), so lookups work fully offline. It also bundles online dictionaries, sentence translation, and optional AI-powered explanations for tricky entries.
+Everything hangs off a lookup panel you can open from the ribbon, a hotkey, or simply by selecting text. Dictionary management, the vocabulary book, and spaced review live in two side views.
 
-### Features
+### What it does
 
-- **Offline dictionary lookup** — parse local `.mdx` / `.mdd` files (MDict / GoldenDict format) with no network required.
-- **Floating lookup popover** — hover over a word to see its definition right where you are reading.
-- **Lookup panel** — open a dedicated word-lookup panel, docked into the content area for a clean reading experience.
-- **Vocabulary book & spaced review** — save words to your own vocabulary list and review them later.
-- **Online dictionaries** — 有道 (Youdao) and Free Dictionary as optional online sources.
-- **Sentence translation** — translate selected sentences via online services.
-- **AI-powered explanations** — optional AI definitions and example sentences, with configurable providers:
-  - OpenAI
-  - DeepSeek
-  - Moonshot (Kimi)
-  - Zhipu GLM
-  - Qwen (Tongyi Qianwen)
-  - Groq
-  - Ollama (local models)
-- **PDF word selection** — look up words selected inside PDFs.
-- **Mobile friendly** — works on Obsidian mobile; no desktop-only API is required.
+**Look words up**
+- Reads `.mdx` dictionaries, together with the matching `.mdd` archive for audio and images, plus any `css` / `js` / `ini` files the entries reference. The format is MDict / GoldenDict.
+- Exact lookup with basic lemmatization. Entries render with their own HTML, so styling and media come through.
+- Dictionary folders are scanned for you. Local dictionaries and online sources appear in one list you can toggle and reorder.
+
+**Pick how it opens**
+- Drawer — a panel docked at the top of the content area (`打开抽屉查词`, default `Mod+Shift+D`).
+- Popover — a compact window floating next to the word you selected (`打开悬浮窗查词`).
+- Selecting any text also raises a small toolbar with 查词 / AI / 发音 / 收藏 buttons. If you prefer, lookups can fire automatically on selection.
+
+**Add online sources**
+- 有道词典 (Youdao) — Chinese definitions, part-of-speech groups, phonetics and UK/US audio.
+- Free Dictionary (dictionaryapi.dev) — English definitions and audio.
+
+**Hear the word**
+- Audio embedded in your local dictionary is played first, then Youdao, then Free Dictionary, with the system text-to-speech voice as a last resort. Both online sources have UK/US variants.
+
+**Translate whole sentences**
+- MyMemory needs no key; 百度翻译 (Baidu) is available if you have an app ID and secret.
+
+**Ask an AI (optional)**
+- Works with any OpenAI-compatible endpoint. Presets cover OpenAI, DeepSeek, Moonshot (Kimi), 智谱 GLM, 通义千问 (Qwen), Groq, and a local Ollama server — that last one keeps everything on your machine.
+- Replies stream in, and the panel falls back to the AI explanation when no dictionary matches.
+- Prompt templates: a default dictionary layout, a Collins-style one, an Oxford-style one, or your own custom prompt.
+
+**Save and review words**
+- Words are saved to a vocabulary book, stored as JSON inside your vault (so it moves with the vault).
+- Review with a trimmed-down SM-2 schedule: rate each word 忘记 (forgotten), 模糊 (shaky) or 认识 (known), and the plugin works out the next interval — 1 / 3 / 7 days by default — and shows what is coming up. Intervals and ease parameters are adjustable.
+- Words you look up can be added to the book automatically, if you turn that on.
+
+**Sync with 欧路词典 (Eudic)**
+- Push your vocabulary to Eudic's study list, or pull words back from it — on demand, or automatically each time you save a word. Requires an Eudic OpenAPI token.
+
+**In PDFs**
+- Double-click a word in a PDF to look it up. Selected text also gets a right-click menu for 查词 / 生词本 / AI.
+
+**On mobile**
+- No desktop-only APIs are used, and `manifest.json` sets `isDesktopOnly: false`.
 
 ### Installation
 
-#### Community plugins directory
+**Community plugins** — LinguaNex has been submitted to the official directory. Once it is approved, search for "LinguaNex" under Settings → Community plugins → Browse.
 
-LinguaNex is submitted to the [Obsidian community plugins](https://obsidian.md/plugins) directory. Once approved, install it from **Settings → Community plugins → Browse**, search for "LinguaNex", and enable it.
+**Manual** — download the latest `lingua-nex-<version>.zip` from the [Releases page](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases), unzip it into `<vault>/.obsidian/plugins/lingua-nex/`, then enable LinguaNex under Settings → Community plugins.
 
-#### Manual installation
+**BRAT** — add `https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin` as a beta plugin to try pre-release builds.
 
-1. Download the latest release (`lingua-nex-<version>.zip`) from the [GitHub Releases](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases) page.
-2. Unzip it into your vault's plugin folder: `<vault>/.obsidian/plugins/lingua-nex/`.
-3. Restart Obsidian (or reload the plugin) and enable **LinguaNex** in **Settings → Community plugins**.
+### Commands
 
-#### BRAT (for testing pre-release builds)
+The command names are in Chinese, matching the plugin's UI.
 
-1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin.
-2. Run command **BRAT: Add a beta plugin for testing** and enter `https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin`.
-3. Enable **LinguaNex** in **Settings → Community plugins**.
+| Command | What it does | Default |
+| --- | --- | --- |
+| LinguaNex: 打开抽屉查词 | Open the drawer lookup panel | `Mod+Shift+D` |
+| LinguaNex: 打开悬浮窗查词 | Show a popover next to the selection, or a floating input | |
+| LinguaNex: 关闭查词面板 | Close the current panel | |
+| LinguaNex: 打开词典管理 | Open the dictionary manager | |
+| LinguaNex: 打开生词复习 | Open the vocabulary review | |
+| LinguaNex: 收藏选中单词 | Add the selected word to your vocabulary book | |
 
-### Usage
+You can rebind all of these under Settings → Hotkeys.
 
-#### Commands
+### Local dictionaries
 
-| Command | Description |
-| --- | --- |
-| `LinguaNex: Look up word` | Open the lookup panel for the selected word (or the word at cursor). |
-| `LinguaNex: Look up (hover)` | With a selection, show the definition in a floating popover next to it; without a selection, open the lookup panel. |
-| `LinguaNex: Close lookup panel` | Close the current lookup panel. |
-| `LinguaNex: Open dictionary manager` | Manage installed MDX/MDD dictionaries and online sources. |
-| `LinguaNex: Open word review` | Open the spaced-repetition review for your vocabulary book. |
-| `LinguaNex: Save selected word` | Add the selected word to your vocabulary book. |
+Put your `.mdx` files — and the matching `.mdd`, if there is one — anywhere in the vault, add that folder in the plugin settings, and LinguaNex scans it. Each dictionary then appears in the manager, where you can enable it, remove it, or change its priority. Lookups from these files run entirely offline.
 
-Assign hotkeys to these commands in **Settings → Hotkeys** for fastest access.
+### Settings
 
-#### Lookup flow
-
-1. Select a word in any note (or PDF).
-2. Trigger **Look up word** or **Look up (hover)**.
-3. Read the definition from your local dictionary, online sources, or the AI provider — whichever is enabled.
-4. Optionally save the word to your vocabulary book for later review.
-
-#### Dictionaries
-
-- **Local MDX/MDD**: drop your `.mdx` (and optional `.mdd` media) files into the folder configured in settings, then add them in the dictionary manager. Lookups are instant and offline.
-- **Online sources**: enable 有道 (Youdao) or Free Dictionary in settings for fallback lookups.
-- **Sentence translation**: enable the online translation source to translate full sentences.
-
-#### AI explanations
-
-In **Settings → AI**, choose a provider, enter your API key / base URL, and enable AI explanations. Lookup results will include AI-generated definitions, usage notes, or example sentences. Ollama users can point the base URL at a local model — no data leaves your machine.
+The settings tab covers: the dictionary folders and the combined source list; lookup behaviour (drawer or popover, the selection toolbar, auto-lookup, and the key that closes the panel); translation engine and credentials; pronunciation sources and variants; PDF options; the AI provider, endpoint and prompt; the default vocabulary book; and Eudic sync.
 
 ### Development
 
-The plugin is written in TypeScript and built with `tsc` + `esbuild`.
-
 ```bash
 git clone https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin.git
-cd lingua-nex
+cd Obsidian-LinguaNex-plugin
 npm install
 npm run build
 ```
 
-`npm run build` produces `main.js`, `manifest.json`, and `styles.css` for the release.
+`npm run build` type-checks the sources and bundles `main.js`, `manifest.json` and `styles.css`.
 
-### Compatibility
+### Notes
 
-- Obsidian `>= 1.4.0` (desktop and mobile).
-- MDX/MDD dictionaries must be in MDict / GoldenDict format.
+- Requires Obsidian 1.4.0 or newer. Dictionaries must be in MDict / GoldenDict format.
+- The plugin UI is currently in Chinese.
+- MDX/MDD parsing builds on [mdict-js](https://www.npmjs.com/package/mdict-js); the review scheduling follows the SM-2 approach used by fleurdict. Thanks to both.
 
 ### License
 
@@ -105,96 +112,98 @@ npm run build
 
 ## 中文
 
-在本地 MDX/MDD 词典中查词、构建生词本，并通过间隔重复复习——桌面端与移动端均可用。
+LinguaNex 把词典搬进了 Obsidian。它直接读取你手头已有的 MDX/MDD 词典——也就是 MDict、GoldenDict 使用的格式，多数中英词典包都是这个格式——让你不必离开笔记、也不必联网就能查词。当内置来源不够用时，还可以接入在线词典、整句翻译，或让 AI 给出更完整的解释。
 
-LinguaNex 是一款注重隐私的 [Obsidian](https://obsidian.md/) 词典插件。它直接读取你自己的 `.mdx` / `.mdd` 词典文件（MDict / GoldenDict 使用的标准格式），查词完全离线进行。同时内置在线词典、整句翻译，以及可选的 AI 释义功能，用于解释疑难词条。
+插件的入口是一块查词面板：可以从侧边栏图标、快捷键打开，选中文本也会触发。词典管理、生词本和间隔复习则放在两个独立视图中。
 
-### 功能特性
+### 功能
 
-- **离线词典查词** — 解析本地 `.mdx` / `.mdd` 文件（MDict / GoldenDict 格式），无需联网。
-- **悬浮查词浮窗** — 鼠标悬停单词即可在阅读位置直接查看释义。
-- **查词面板** — 打开专属查词面板，停靠在内容区，获得干净的阅读体验。
-- **生词本与间隔复习** — 将单词保存到自己的生词列表，之后按间隔重复复习。
-- **在线词典** — 可选接入有道（Youdao）和 Free Dictionary 作为在线查询来源。
-- **整句翻译** — 通过在线服务翻译选中的句子。
-- **AI 释义** — 可选的 AI 释义与例句功能，支持可配置的提供商：
-  - OpenAI
-  - DeepSeek
-  - Moonshot（Kimi）
-  - 智谱 GLM
-  - Qwen（通义千问）
-  - Groq
-  - Ollama（本地模型）
-- **PDF 取词** — 在 PDF 中选中单词即可查词。
-- **移动端友好** — 支持 Obsidian 移动端，不依赖桌面端专属 API。
+**查词**
+- 读取 `.mdx` 词典，并配套读取同名的 `.mdd` 归档（用于音频与图片），以及词条引用的 `css` / `js` / `ini` 文件。格式为 MDict / GoldenDict。
+- 精确查找并做基础词形还原，词条按自身 HTML 渲染，样式与媒体都能正常显示。
+- 词典目录会被自动扫描。本地词典与在线来源显示在同一个列表中，可启用/停用并调整顺序。
+
+**选择打开方式**
+- 抽屉 —— 停靠在内容区顶部的面板（`打开抽屉查词`，默认快捷键 `Mod+Shift+D`）。
+- 悬浮窗 —— 浮在所选单词旁边的紧凑窗口（`打开悬浮窗查词`）。
+- 选中任意文本还会弹出一个小工具条，含 查词 / AI / 发音 / 收藏 四个按钮。如果愿意，也可以开启选中后自动查词。
+
+**接入在线来源**
+- 有道词典 —— 中文释义、词性分组、音标与英/美发音。
+- Free Dictionary（dictionaryapi.dev）—— 英文释义与发音。
+
+**发音**
+- 优先播放本地词典内嵌音频，其次是有道，再次是 Free Dictionary，最后兜底到系统语音合成。两个在线来源都支持英式 / 美式发音变体。
+
+**整句翻译**
+- MyMemory 免 Key 可用；如果申请了百度翻译开放平台的 APP ID 与密钥，也可以选用百度翻译。
+
+**AI 释义（可选）**
+- 兼容任意 OpenAI 格式接口。内置预设包括 OpenAI、DeepSeek、Moonshot（Kimi）、智谱 GLM、通义千问、Groq，以及本地 Ollama —— 用 Ollama 时数据不出本机。
+- 回复流式返回；词典都查不到时，面板会兜底用 AI 解释。
+- 提示词模板提供默认词典版式、柯林斯式、牛津式，也可完全自定义。
+
+**生词与复习**
+- 收藏的单词存入生词本，以 JSON 文件保存在仓库内，随仓库一起同步。
+- 复习采用精简版 SM-2：给每个词评「忘记 / 模糊 / 认识」，插件据此算出下次复习间隔（默认 1 / 3 / 7 天）并展示后续计划。间隔与难度系数都可调整。
+- 可以把查过的词自动加入生词本（默认关闭）。
+
+**与欧路词典同步**
+- 把生词推送到欧路的学习记录，或从欧路拉取单词，可手动执行，也可在收藏单词时自动同步。需要欧路 OpenAPI 的 Token。
+
+**PDF**
+- 在 PDF 中双击单词即可查词；选中文本也有右键菜单，提供 查词 / 生词本 / AI。
+
+**移动端**
+- 不依赖任何桌面端专属 API，`manifest.json` 中 `isDesktopOnly: false`。
 
 ### 安装
 
-#### 社区插件目录
+**社区插件** —— LinguaNex 已提交至官方插件目录。审核通过后，在 设置 → 社区插件 → 浏览 中搜索 "LinguaNex" 即可。
 
-LinguaNex 已提交至 [Obsidian 社区插件](https://obsidian.md/plugins) 目录。审核通过后，可在 **设置 → 社区插件 → 浏览** 中搜索 "LinguaNex" 并启用。
+**手动安装** —— 从 [Releases 页面](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases) 下载最新的 `lingua-nex-<version>.zip`，解压到 `<vault>/.obsidian/plugins/lingua-nex/`，然后在 设置 → 社区插件 中启用 LinguaNex。
 
-#### 手动安装
+**BRAT** —— 将 `https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin` 添加为测试版插件，即可安装预发布版本。
 
-1. 从 [GitHub Releases](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases) 页面下载最新发行版（`lingua-nex-<version>.zip`）。
-2. 解压到你的仓库插件目录：`<vault>/.obsidian/plugins/lingua-nex/`。
-3. 重启 Obsidian（或重新加载插件），并在 **设置 → 社区插件** 中启用 **LinguaNex**。
+### 命令
 
-#### BRAT（用于测试预发布版本）
+命令名称与插件界面一致，均为中文。
 
-1. 安装 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 插件。
-2. 运行命令 **BRAT: Add a beta plugin for testing** 并输入 `https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin`。
-3. 在 **设置 → 社区插件** 中启用 **LinguaNex**。
+| 命令 | 说明 | 默认快捷键 |
+| --- | --- | --- |
+| LinguaNex: 打开抽屉查词 | 打开顶部抽屉查词面板 | `Mod+Shift+D` |
+| LinguaNex: 打开悬浮窗查词 | 在选区旁弹出悬浮释义窗，或打开悬浮输入框 | |
+| LinguaNex: 关闭查词面板 | 关闭当前查词面板 | |
+| LinguaNex: 打开词典管理 | 打开词典管理器 | |
+| LinguaNex: 打开生词复习 | 打开生词复习 | |
+| LinguaNex: 收藏选中单词 | 把选中的单词加入生词本 | |
 
-### 使用方法
+以上命令都可以在 设置 → 快捷键 中另行绑定。
 
-#### 命令
+### 本地词典
 
-| 命令 | 说明 |
-| --- | --- |
-| `LinguaNex: Look up word` | 为选中的单词（或光标处的单词）打开查词面板。 |
-| `LinguaNex: Look up (hover)` | 有选中内容时，在选区旁边以悬浮浮窗显示释义；无选中内容时打开查词面板。 |
-| `LinguaNex: Close lookup panel` | 关闭当前查词面板。 |
-| `LinguaNex: Open dictionary manager` | 管理已安装的 MDX/MDD 词典与在线词源。 |
-| `LinguaNex: Open word review` | 打开生词本的间隔重复复习。 |
-| `LinguaNex: Save selected word` | 将选中的单词加入生词本。 |
+把 `.mdx` 文件（以及配套的 `.mdd`，如果有）放到仓库任意位置，在插件设置里添加该文件夹，LinguaNex 就会扫描它。之后每本词典都会出现在管理器中，可启用、移除或调整优先级。用这些文件查词完全离线。
 
-可在 **设置 → 快捷键** 中为这些命令分配快捷键，以便快速使用。
+### 设置
 
-#### 查词流程
-
-1. 在任意笔记（或 PDF）中选中一个单词。
-2. 触发 **Look up word** 或 **Look up (hover)**。
-3. 从本地词典、在线词源或 AI 提供商（视启用情况而定）读取释义。
-4. 可选择将单词保存到生词本，供日后复习。
-
-#### 词典
-
-- **本地 MDX/MDD**：将你的 `.mdx`（及可选的 `.mdd` 媒体文件）放入设置中配置的目录，然后在词典管理器中添加。查询即时完成且完全离线。
-- **在线词源**：在设置中启用有道（Youdao）或 Free Dictionary 作为兜底查询来源。
-- **整句翻译**：启用在线翻译来源以翻译完整句子。
-
-#### AI 释义
-
-在 **设置 → AI** 中选择提供商，填写 API 密钥 / Base URL，并启用 AI 释义。查询结果将包含 AI 生成的释义、用法说明或例句。Ollama 用户可将 Base URL 指向本地模型——数据不会离开你的设备。
+设置页涵盖：词典目录与合并后的来源列表；查词行为（抽屉或悬浮窗、选中工具条、自动查词、关闭面板的按键）；翻译引擎与凭据；发音来源与变体；PDF 选项；AI 提供商、接口与提示词；默认生词本；以及欧路同步。
 
 ### 开发
 
-插件使用 TypeScript 编写，通过 `tsc` + `esbuild` 构建。
-
 ```bash
 git clone https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin.git
-cd lingua-nex
+cd Obsidian-LinguaNex-plugin
 npm install
 npm run build
 ```
 
-`npm run build` 会生成用于发布的 `main.js`、`manifest.json` 和 `styles.css`。
+`npm run build` 会做类型检查，并打包出 `main.js`、`manifest.json` 和 `styles.css`。
 
-### 兼容性
+### 说明
 
-- Obsidian `>= 1.4.0`（桌面端与移动端）。
-- MDX/MDD 词典必须是 MDict / GoldenDict 格式。
+- 需要 Obsidian 1.4.0 及以上。词典须为 MDict / GoldenDict 格式。
+- 插件界面目前为中文。
+- MDX/MDD 解析基于 [mdict-js](https://www.npmjs.com/package/mdict-js)；复习调度参考了 fleurdict 采用的 SM-2 方案。在此致谢。
 
 ### 许可证
 
