@@ -15,6 +15,14 @@ LinguaNex brings a dictionary into Obsidian. It reads the MDX/MDD dictionaries y
 
 Everything hangs off a lookup panel you can open from the ribbon, a hotkey, or simply by selecting text. Dictionary management, the vocabulary book, and spaced review live in two side views.
 
+### Preview
+<img width="220" height="150" alt="image_1792135121925" src="https://github.com/user-attachments/assets/819c80dc-a934-49a3-ad8b-1adb13984e37" />
+
+
+<img width="140" height="338" alt="image_1792135123740" src="https://github.com/user-attachments/assets/f4739382-7518-4676-9aa2-f0f17993343b" />
+<img width="140" height="338" alt="image_1792135126795" src="https://github.com/user-attachments/assets/a6ac8264-4e22-4e9c-b9fe-dddd68dd4097" />
+<img width="140" height="338" alt="image_1792135152034" src="https://github.com/user-attachments/assets/4501ddbd-8bd9-43fc-bb44-a2d7a0b4522d" />
+
 ### What it does
 
 **Look words up**
@@ -115,6 +123,14 @@ npm run build
 LinguaNex 把词典搬进了 Obsidian。它直接读取你手头已有的 MDX/MDD 词典——也就是 MDict、GoldenDict 使用的格式，多数中英词典包都是这个格式——让你不必离开笔记、也不必联网就能查词。当内置来源不够用时，还可以接入在线词典、整句翻译，或让 AI 给出更完整的解释。
 
 插件的入口是一块查词面板：可以从侧边栏图标、快捷键打开，选中文本也会触发。词典管理、生词本和间隔复习则放在两个独立视图中。
+
+### 部分效果展示
+<img width="220" height="150" alt="image_1792135121925" src="https://github.com/user-attachments/assets/819c80dc-a934-49a3-ad8b-1adb13984e37" />
+
+
+<img width="140" height="338" alt="image_1792135123740" src="https://github.com/user-attachments/assets/f4739382-7518-4676-9aa2-f0f17993343b" />
+<img width="140" height="338" alt="image_1792135126795" src="https://github.com/user-attachments/assets/a6ac8264-4e22-4e9c-b9fe-dddd68dd4097" />
+<img width="140" height="338" alt="image_1792135152034" src="https://github.com/user-attachments/assets/4501ddbd-8bd9-43fc-bb44-a2d7a0b4522d" />
 
 ### 功能
 
