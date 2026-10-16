@@ -1,0 +1,1765 @@
+/* LinguaNex — 细边线 · 简洁 · 流畅动画 */
+
+:root {
+	--lx-accent: var(--interactive-accent, #7c6cf0);
+	--lx-border: var(--background-modifier-border, #d0d0d0);
+	--lx-radius: 10px;
+	--lx-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+}
+
+/* ---------- 顶部下拉抽屉遮罩：点击面板以外区域即收回 ---------- */
+.lingua-nex-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: calc(var(--layer-modal, 1000) - 1);
+	background: rgba(0, 0, 0, 0.38);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.22s ease;
+}
+
+.lingua-nex-backdrop.shown {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* ---------- 顶部下拉抽屉查词面板 ---------- */
+.lingua-nex-panel {
+	position: fixed;
+	/* 贴顶成整体抽屉，状态栏高度由 .lx-header 的 padding-top 吸收，不留空隙 */
+	top: 0;
+	left: 0;
+	right: 0;
+	width: 100%;
+	max-height: min(80vh, 760px);
+	display: none;
+	flex-direction: column;
+	background: var(--background-primary);
+	border: none;
+	border-bottom: 1px solid var(--lx-border);
+	border-radius: 0 0 var(--lx-radius) var(--lx-radius);
+	box-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+	z-index: var(--layer-modal, 1000);
+	transform: translateY(-8px);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.18s ease, transform 0.18s ease;
+	overflow: hidden;
+}
+
+.lingua-nex-panel.shown {
+	display: flex;
+	transform: translateY(0);
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* 悬浮窗形态：完整复用抽屉渲染，仅改为选区附近的悬浮卡片（位置由 JS showAt 设置） */
+.lingua-nex-panel.lx-floating {
+	right: auto;
+	border: 1px solid var(--lx-border);
+	border-radius: var(--lx-radius);
+	box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+	transform: none;
+}
+.lingua-nex-panel.lx-floating.shown {
+	transform: none;
+}
+/* 悬浮卡片不是贴顶抽屉，头部无需避让状态栏 */
+.lingua-nex-panel.lx-floating .lx-header {
+	padding-top: 8px;
+	cursor: grab;
+	touch-action: none;
+	transition: height 0.2s ease, padding 0.2s ease, box-shadow 0.2s ease;
+}
+.lingua-nex-panel.lx-floating.lx-dragging .lx-header,
+.lingua-nex-panel.lx-floating .lx-header:active {
+	cursor: grabbing;
+}
+
+/* 顶部栏仅含 header（名称/输入框/关闭钮）：悬浮形态常驻吸顶不收起，空白区可拖动换位；
+   词典 Tab 在内容滚动区顶部，与内容合为一体随内容自然上走，无联动动画 */
+.lingua-nex-panel .lx-top {
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+}
+.lingua-nex-panel.lx-floating .lx-top {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 2;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.lingua-nex-panel.lx-floating .lx-content-wrap {
+	/* 顶部腾位固定为 header 实际高度（JS 写入 --lx-top-h），不再随滚动变化 */
+	margin-top: var(--lx-top-h, 46px);
+}
+/* 悬浮窗常驻关闭钮：悬浮形态始终显示，随时可关闭 */
+.lingua-nex-panel .lx-float-close {
+	display: none;
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 3;
+	width: 30px;
+	height: 30px;
+	align-items: center;
+	justify-content: center;
+	background: var(--background-secondary);
+	border: 1px solid var(--lx-border);
+	border-radius: 50%;
+	color: var(--text-normal);
+	font-size: 14px;
+	line-height: 1;
+	cursor: pointer;
+	box-shadow: var(--lx-shadow);
+}
+.lingua-nex-panel .lx-float-close:active {
+	background: var(--background-modifier-hover);
+}
+.lingua-nex-panel.lx-floating .lx-float-close {
+	display: flex;
+}
+
+/* 悬浮窗：顶部栏空白区可拖动换位（输入框/按钮区域自动跳过），四边四角无级缩放 */
+.lingua-nex-panel.lx-floating .lx-top {
+	cursor: grab;
+}
+.lingua-nex-panel.lx-floating.lx-dragging .lx-top,
+.lingua-nex-panel.lx-floating .lx-top:active {
+	cursor: grabbing;
+}
+.lingua-nex-panel .lx-resize-handle {
+	display: none;
+	position: absolute;
+	z-index: 6;
+	touch-action: none;
+}
+.lingua-nex-panel.lx-floating .lx-resize-handle {
+	display: block;
+}
+.lingua-nex-panel .lx-resize-handle.n {
+	top: -4px;
+	left: 14px;
+	right: 14px;
+	height: 8px;
+	cursor: ns-resize;
+}
+.lingua-nex-panel .lx-resize-handle.s {
+	bottom: -4px;
+	left: 14px;
+	right: 14px;
+	height: 8px;
+	cursor: ns-resize;
+}
+.lingua-nex-panel .lx-resize-handle.e {
+	top: 14px;
+	bottom: 14px;
+	right: -4px;
+	width: 8px;
+	cursor: ew-resize;
+}
+.lingua-nex-panel .lx-resize-handle.w {
+	top: 14px;
+	bottom: 14px;
+	left: -4px;
+	width: 8px;
+	cursor: ew-resize;
+}
+.lingua-nex-panel .lx-resize-handle.ne {
+	top: -4px;
+	right: -4px;
+	width: 14px;
+	height: 14px;
+	cursor: nesw-resize;
+}
+.lingua-nex-panel .lx-resize-handle.nw {
+	top: -4px;
+	left: -4px;
+	width: 14px;
+	height: 14px;
+	cursor: nwse-resize;
+}
+.lingua-nex-panel .lx-resize-handle.se {
+	bottom: -4px;
+	right: -4px;
+	width: 14px;
+	height: 14px;
+	cursor: nwse-resize;
+}
+.lingua-nex-panel .lx-resize-handle.sw {
+	bottom: -4px;
+	left: -4px;
+	width: 14px;
+	height: 14px;
+	cursor: nesw-resize;
+}
+
+/* 悬浮窗内容字号适配：AI 释义、追问条、输入框、Tab 全部略缩小，保证大面板内不遮挡 */
+.lingua-nex-panel.lx-floating .lx-ai-holder .lx-ai-md {
+	font-size: 0.86em;
+}
+.lingua-nex-panel.lx-floating .lx-ai-holder .lx-ai-md p {
+	margin: 4px 0;
+}
+.lingua-nex-panel.lx-floating .lx-ai-holder .lx-ai-md h1,
+.lingua-nex-panel.lx-floating .lx-ai-holder .lx-ai-md h2,
+.lingua-nex-panel.lx-floating .lx-ai-holder .lx-ai-md h3 {
+	margin: 6px 0 3px;
+}
+.lingua-nex-panel.lx-floating .lx-ai-ask-input {
+	font-size: 14px;
+	padding: 6px 10px;
+}
+.lingua-nex-panel.lx-floating .lx-ai-ask-btn {
+	font-size: 13px;
+	padding: 5px 12px;
+}
+.lingua-nex-panel.lx-floating .lx-input:not(.lx-search-mini) {
+	font-size: 14px;
+	padding: 4px 8px;
+}
+.lingua-nex-panel.lx-floating .lx-search-mini {
+	font-size: 10px;
+	padding: 2px 8px;
+}
+.lingua-nex-panel.lx-floating .lx-tab {
+	font-size: 0.84em;
+	padding: 4px 8px;
+}
+.lingua-nex-panel.lx-floating .lx-status {
+	font-size: 0.82em;
+}
+
+/* 头部：内容整体下移，避开状态栏，保证点击区域可用 */
+.lingua-nex-panel .lx-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 10px;
+	padding-top: max(28px, env(safe-area-inset-top));
+	border-bottom: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	flex-shrink: 0;
+}
+
+.lingua-nex-panel .lx-title {
+	font-weight: 600;
+	font-size: 13px;
+	color: var(--lx-accent);
+	margin-right: 4px;
+	white-space: nowrap;
+}
+
+.lingua-nex-panel .lx-icon-btn {
+	background: transparent;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	padding: 2px 6px;
+	font-size: 14px;
+	line-height: 1;
+	border-radius: 6px;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.lingua-nex-panel .lx-icon-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* 收藏星标激活态：已收藏时填充黄色 ★，与未收藏 ☆ 形成区分 */
+.lingua-nex-panel .lx-fav.active {
+	color: #f5c518;
+	text-shadow: 0 0 2px rgba(245, 197, 24, 0.45);
+}
+
+/* 顶部“上一个查的词”：显示在标题与输入框之间，可点击切回 */
+.lingua-nex-panel .lx-prev-word {
+	flex: none;
+	min-width: 0;
+	max-width: 34%;
+	background: transparent;
+	border: none;
+	color: var(--text-faint);
+	font-size: 12px;
+	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	padding: 2px 6px;
+	border-radius: 999px;
+	cursor: pointer;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+.lingua-nex-panel .lx-prev-word:hover {
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 10%, transparent);
+}
+.lingua-nex-panel .lx-prev-word.hidden {
+	visibility: hidden;
+}
+
+/* 顶部大输入框：兜底入口，正常查词输入（迷你搜索太小时可改用它） */
+.lingua-nex-panel .lx-input {
+	flex: 1;
+	min-width: 0;
+	background: var(--background-primary);
+	border: 1px solid var(--lx-border);
+	border-radius: 6px;
+	padding: 5px 10px;
+	font-size: 15px;
+	color: var(--text-normal);
+	transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+/* 底部迷你搜索：胶囊大小，字号对齐词典胶囊/词条数 */
+.lingua-nex-panel .lx-search-mini {
+	flex: none;
+	width: 96px;
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: 10.5px;
+}
+
+.lingua-nex-panel .lx-input:focus {
+	border-color: var(--lx-accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--lx-accent) 18%, transparent);
+	outline: none;
+}
+
+/* 解释源 tabs：横向滑动容器，词典多时可滑动查看 */
+.lingua-nex-panel .lx-tabs {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: center;
+	gap: 4px;
+	padding: 5px 8px 4px;
+	border-bottom: 1px solid var(--lx-border);
+	background: var(--background-primary);
+	flex-shrink: 0;
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: none;
+}
+.lingua-nex-panel .lx-tabs::-webkit-scrollbar {
+	display: none;
+}
+
+/* 词典 tab：迷你胶囊 tag，名字过长自动截断（进一步缩小：只包住文字） */
+.lingua-nex-panel .lx-tab {
+	border: 1px solid var(--lx-border);
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 11px;
+	padding: 3px 10px;
+	line-height: 1.2;
+	border-radius: 999px;
+	cursor: pointer;
+	transition: all 0.16s ease;
+	max-width: 88px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.lingua-nex-panel .lx-tab:hover {
+	color: var(--text-normal);
+	border-color: var(--lx-accent);
+}
+
+.lingua-nex-panel .lx-tab.active {
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 12%, transparent);
+	font-weight: 600;
+}
+
+/* 内容区：内部滚动由 lx-content-inner 统一承担，滚动条绝对定位于本层不随内容移动 */
+.lingua-nex-panel .lx-content-wrap {
+	flex: 1;
+	min-height: 0;
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+/* 抽屉形态（非悬浮）：面板高度贴合内容实际高度，不再被 flex:1 撑满到 max-height；
+   内容超高时仍受面板 max-height(80vh/760px) 约束，超高部分由 lx-content-inner 内部滚动 */
+.lingua-nex-panel:not(.lx-floating) .lx-content-wrap {
+	flex: 0 1 auto;
+}
+.lingua-nex-panel:not(.lx-floating) .lx-content-inner {
+	flex: 0 1 auto;
+}
+
+/* 词典 + 分隔线 + AI 区统一滚动容器：
+   词典全文与 AI 回答均为内容自适应高度，内容超高时整体在此滚动查看 */
+.lingua-nex-panel .lx-content-inner {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: auto;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior: contain;
+}
+
+/* 未命中占位：切源未命中时中间区域显示，居中提示，让用户直观看到当前源没查到 */
+.lingua-nex-panel .lx-miss {
+	margin: auto;
+	padding: 28px 18px;
+	text-align: center;
+	color: var(--text-muted);
+	font-size: 14px;
+	line-height: 1.7;
+	white-space: pre-line;
+}
+
+.lingua-nex-panel .lx-iframe {
+	width: 100%;
+	/* 初始高度 0（面板紧凑不空白），词典内容加载后由 JS 按滚动高度撑到实际高度，全文由 lx-content-inner 统一滚动查看 */
+	flex: 0 0 auto;
+	height: 0;
+	min-height: 0;
+	border: none;
+	display: block;
+	background: #fff;
+}
+
+.lingua-nex-panel .lx-iframe.hidden {
+	display: none;
+}
+
+.lingua-nex-panel .lx-ai-holder {
+	padding: 8px 16px 0;
+	font-size: 14px;
+	line-height: 1.7;
+	display: flex;
+	flex-direction: column;
+	/* 内容自适应：AI 回答多高就多高，不依赖 flex-grow，天然不会折叠；超高由 lx-content-inner 统一滚动 */
+	flex: 0 0 auto;
+	min-height: 0;
+}
+
+/* AI 区无内容时（未触发 AI）完全隐藏，词典区占满整屏（JS 增删 class 控制） */
+.lingua-nex-panel .lx-ai-holder.lx-ai-hidden {
+	display: none;
+}
+
+.lingua-nex-panel .lx-ai-holder h1,
+.lingua-nex-panel .lx-ai-holder h2,
+.lingua-nex-panel .lx-ai-holder h3 {
+	margin: 10px 0 6px;
+	font-size: 15px;
+}
+
+/* 底部操作栏：两行。行1 词条信息+收藏/喇叭+迷你搜索；行2 左右切换（右下角） */
+.lingua-nex-panel .lx-status {
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 4px 10px;
+	padding-bottom: max(4px, env(safe-area-inset-bottom));
+	font-size: 11px;
+	color: var(--text-faint);
+	background: color-mix(in srgb, var(--background-primary) 86%, transparent);
+	backdrop-filter: blur(4px);
+	border-top: 1px solid var(--lx-border);
+}
+.lingua-nex-panel .lx-status-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 22px;
+}
+.lingua-nex-panel .lx-status-row1 {
+	flex-wrap: nowrap;
+}
+.lingua-nex-panel .lx-status-spacer {
+	flex: 1;
+	min-width: 4px;
+}
+.lingua-nex-panel .lx-status-row2 {
+	justify-content: flex-end;
+	min-height: 0;
+}
+.lingua-nex-panel .lx-status .lx-icon-btn {
+	font-size: 13px;
+	padding: 2px 5px;
+}
+/* 左右切换按钮（上一次/下一次查的词）：窄条贴右下角，不占高度 */
+.lingua-nex-panel .lx-nav {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+.lingua-nex-panel .lx-nav .lx-icon-btn {
+	font-size: 12px;
+	padding: 0 6px;
+	line-height: 16px;
+}
+/* 状态文本（就绪/查询中/错误等）单独一行，不破坏操作栏 */
+.lingua-nex-panel .lx-status-text {
+	font-size: 10.5px;
+	color: var(--text-faint);
+	text-align: center;
+	padding: 1px 0;
+}
+.lingua-nex-panel .lx-status-text.hidden {
+	display: none;
+}
+
+.lingua-nex-panel .lx-status.hidden {
+	display: none;
+}
+
+/* 状态胶囊切换弹层锚点 */
+.lingua-nex-panel .lx-status.lx-has-switch {
+	position: relative;
+}
+
+/* 底部状态胶囊展开的源切换列表：小胶囊，横向可滚动 */
+.lingua-nex-panel .lx-source-switch {
+	position: absolute;
+	bottom: 64px;
+	left: 8px;
+	max-width: 86%;
+	display: flex;
+	flex-wrap: nowrap;
+	gap: 5px;
+	padding: 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--lx-border);
+	border-radius: 10px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: none;
+	z-index: 6;
+}
+.lingua-nex-panel .lx-source-switch::-webkit-scrollbar {
+	display: none;
+}
+.lingua-nex-panel .lx-source-item {
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 8.5px;
+	line-height: 1.4;
+	padding: 2px 6px;
+	border-radius: 999px;
+	cursor: pointer;
+	flex-shrink: 0;
+	white-space: nowrap;
+	max-width: 110px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	transition: all 0.15s ease;
+}
+.lingua-nex-panel .lx-source-item:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.lingua-nex-panel .lx-source-item.active {
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 10%, transparent);
+}
+
+/* 命中状态：小胶囊 tag + 词条数小字 */
+.lingua-nex-panel .lx-status .lx-tag {
+	font-size: 9px;
+	line-height: 1.4;
+	padding: 1px 5px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--lx-accent) 40%, transparent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 8%, transparent);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 140px;
+}
+
+.lingua-nex-panel .lx-status .lx-count {
+	font-size: 10.5px;
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+/* 右侧细滚动进度条（移动端系统滚动条不可见时提示滑动进度） */
+.lingua-nex-panel .lx-scrollbar {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: 4px;
+	pointer-events: none;
+	z-index: 5;
+	background: transparent;
+}
+
+.lingua-nex-panel .lx-scrollbar-thumb {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 100%;
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--text-muted) 32%, transparent);
+	transition: background 0.15s ease;
+}
+
+/* ---------- 选中取词工具条 ---------- */
+.lingua-nex-fbar {
+	position: fixed;
+	z-index: var(--layer-popover, 1000);
+	/* 默认 display:none 兜底：与查词面板一致，杜绝插件样式表注入晚于构造时的首帧闪现 */
+	display: none;
+	flex-direction: row;
+	align-items: center;
+	gap: 3px;
+	padding: 3px 5px;
+	background: var(--background-primary);
+	border: 1px solid var(--lx-border);
+	border-radius: 6px;
+	box-shadow: var(--lx-shadow);
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(4px) scale(0.96);
+	transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.lingua-nex-fbar.shown {
+	display: flex;
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateY(0) scale(1);
+}
+
+.lingua-nex-fbar .lx-fbar-word {
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--lx-accent);
+	max-width: 120px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 0 3px;
+}
+
+.lingua-nex-fbar .lx-fbar-btn {
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	font-size: 11.5px;
+	padding: 1px 8px;
+	border-radius: 5px;
+	cursor: pointer;
+	transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.lingua-nex-fbar .lx-fbar-btn:hover {
+	background: color-mix(in srgb, var(--lx-accent) 12%, transparent);
+	border-color: var(--lx-accent);
+}
+
+/* ---------- 视图 ---------- */
+.lingua-nex-manager,
+.lingua-nex-review {
+	padding: 12px 16px;
+}
+
+.lingua-nex-manager h3,
+.lingua-nex-review h3 {
+	margin: 14px 0 8px;
+	font-size: 14px;
+	border-bottom: 1px solid var(--lx-border);
+	padding-bottom: 6px;
+}
+
+.lingua-nex-empty {
+	color: var(--text-faint);
+	font-size: 13px;
+}
+
+.lx-dict-row,
+.lx-book-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--lx-border);
+	border-radius: 8px;
+	margin-bottom: 6px;
+	transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.lx-dict-row:hover,
+.lx-book-row:hover {
+	border-color: var(--lx-accent);
+	background: var(--background-modifier-hover);
+}
+
+.lx-dict-name {
+	font-weight: 600;
+	font-size: 13px;
+}
+
+/* 在线词典小标签：标在词典名后，极小字号，表明该词典为在线源 */
+.lx-online-tag {
+	display: inline-block;
+	margin-left: 5px;
+	padding: 0 4px;
+	border-radius: 4px;
+	border: 1px solid var(--lx-border);
+	color: var(--text-muted);
+	background: var(--background-modifier-hover);
+	font-size: 9px;
+	line-height: 1.5;
+	vertical-align: middle;
+	letter-spacing: 0.3px;
+}
+
+.lx-dict-meta {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.lx-book-name {
+	font-size: 13px;
+}
+
+.lx-book-count {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.lx-mini-btn {
+	border: 1px solid var(--lx-border);
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 12px;
+	padding: 2px 8px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: all 0.14s ease;
+}
+
+.lx-mini-btn:hover {
+	color: var(--text-normal);
+	border-color: var(--lx-accent);
+}
+
+.lx-book-create {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.lx-book-create .lx-input {
+	flex: 1;
+	border: 1px solid var(--lx-border);
+	border-radius: 6px;
+	padding: 4px 8px;
+	background: var(--background-primary);
+}
+
+/* 复习卡片 */
+.lx-review-card {
+	border: 1px solid var(--lx-border);
+	border-radius: var(--lx-radius);
+	padding: 18px;
+	margin: 8px 0 12px;
+	background: var(--background-primary);
+	transition: transform 0.2s ease;
+}
+
+.lx-review-card.pop {
+	transform: scale(0.99);
+}
+
+.lx-review-word {
+	font-size: 26px;
+	font-weight: 700;
+	letter-spacing: 0.3px;
+	color: var(--lx-accent);
+	margin-bottom: 10px;
+}
+
+.lx-review-def {
+	font-size: 13px;
+	line-height: 1.7;
+	color: var(--text-normal);
+	max-height: 180px;
+	overflow: auto;
+	display: none;
+}
+
+/* 评级后显示解释 */
+.lx-review-def.show {
+	display: block;
+	margin-top: 10px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--lx-border);
+}
+
+.lx-review-btns {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.lx-rbtn {
+	flex: 1;
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	padding: 6px 0;
+	border-radius: 8px;
+	font-size: 13px;
+	cursor: pointer;
+	transition: all 0.16s ease;
+}
+
+.lx-rbtn:hover {
+	border-color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 10%, transparent);
+}
+.lx-rbtn.lx-next {
+	flex: 0 0 auto;
+	display: none;
+	padding: 6px 16px;
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 8%, transparent);
+}
+/* v0.8.3 修复：评级后移除 hidden 类，需显式显示下一词按钮 */
+.lx-rbtn.lx-next:not(.hidden) {
+	display: inline-block;
+}
+.lx-rbtn.hidden {
+	display: none;
+}
+
+.lx-review-count {
+	font-size: 11px;
+	color: var(--text-faint);
+	text-align: right;
+}
+
+.lingua-nex-done {
+	text-align: center;
+	color: var(--text-muted);
+	padding: 24px 0;
+}
+
+/* 设置页 */
+.lingua-nex-hint {
+	color: var(--text-faint);
+	font-size: 12px;
+	margin-top: 12px;
+}
+
+/* 设置页词典分组容器：可滚动 + 分组折叠 */
+.lx-dict-groups {
+	border: 1px solid var(--lx-border);
+	border-radius: 8px;
+	margin: 8px 0;
+	overflow: hidden;
+}
+
+.lx-dict-group {
+	border-bottom: 1px solid var(--lx-border);
+}
+.lx-dict-group:last-child {
+	border-bottom: none;
+}
+
+.lx-dict-group-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 12px;
+	cursor: pointer;
+	background: var(--background-secondary);
+	user-select: none;
+	transition: background 0.14s ease;
+}
+.lx-dict-group-head:hover {
+	background: var(--background-modifier-hover);
+}
+
+.lx-dict-group-name {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.lx-dict-group-count {
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
+/* 组内容：展开时可见，多个词典时可滚动查看 */
+.lx-dict-group-body {
+	max-height: 0;
+	overflow: hidden;
+	transition: max-height 0.22s ease;
+}
+.lx-dict-group-body.open {
+	max-height: 56vh;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+/* 面板打开时防止 body 误滚动 */
+body.lingua-nex-panel-open {
+	overflow: hidden;
+}
+
+/* ---- 设置页搜索补全 ---- */
+.lx-dir-suggest {
+	border: 1px solid var(--lx-border, var(--background-modifier-border));
+	border-radius: 8px;
+	background: var(--background-primary);
+	margin: 4px 0 12px;
+	max-height: 220px;
+	overflow-y: auto;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.lx-dir-suggest:empty {
+	display: none;
+}
+.lx-suggest-item {
+	padding: 8px 12px;
+	cursor: pointer;
+	border-bottom: 1px solid var(--lx-border, var(--background-modifier-border));
+	font-size: 13px;
+	word-break: break-all;
+}
+.lx-suggest-item:hover {
+	background: var(--interactive-accent-hover, var(--background-modifier-hover));
+	color: var(--text-on-accent, var(--text-normal));
+}
+.lx-suggest-item:last-child {
+	border-bottom: none;
+}
+.lx-suggest-empty {
+	padding: 8px 12px;
+	color: var(--text-muted);
+	font-size: 13px;
+}
+
+/* ---- 设置页词典可排序列表：固定容器滑动 + ↑/↓ 排序 + 启用 ---- */
+.lx-dict-list {
+	border: 1px solid var(--lx-border, var(--background-modifier-border));
+	border-radius: 8px;
+	margin: 4px 0 12px;
+	height: 300px;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	background: var(--background-primary);
+}
+.lx-dict-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--lx-border, var(--background-modifier-border));
+}
+.lx-dict-row:last-child {
+	border-bottom: none;
+}
+.lx-dict-info {
+	flex: 1;
+	min-width: 0;
+}
+.lx-dict-name {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.lx-dict-meta {
+	font-size: 11px;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.lx-sort-btn {
+	background: var(--background-secondary);
+	border: 1px solid var(--lx-border, var(--background-modifier-border));
+	border-radius: 6px;
+	color: var(--text-muted);
+	font-size: 12px;
+	line-height: 1;
+	padding: 5px 7px;
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: background 0.14s ease, color 0.14s ease;
+}
+.lx-sort-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.lx-sort-btn.on {
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 8%, transparent);
+}
+.lx-sort-btn.lx-danger {
+	color: var(--text-error, #e5534b);
+}
+
+/* ---- 词典管理/生词本书架：横向滑动卡片容器 ---- */
+.lx-shelf {
+	display: flex;
+	flex-wrap: nowrap;
+	gap: 10px;
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+	padding: 6px 2px 12px;
+	scrollbar-width: none;
+}
+.lx-shelf::-webkit-scrollbar {
+	display: none;
+}
+.lx-shelf-card {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 118px;
+	max-width: 140px;
+	padding: 8px;
+	border: 1px solid var(--lx-border, var(--background-modifier-border));
+	border-radius: 10px;
+	background: var(--background-primary);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+	flex-shrink: 0;
+}
+.lx-shelf-card.on {
+	border-color: var(--lx-accent);
+}
+.lx-shelf-card.book {
+	background: var(--background-secondary);
+}
+.lx-shelf-title {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--text-normal);
+	word-break: break-all;
+}
+.lx-shelf-meta {
+	font-size: 11px;
+	color: var(--text-faint);
+}
+.lx-shelf-ops {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+	margin-top: 2px;
+}
+.lx-book-create {
+	display: flex;
+	gap: 6px;
+	margin: 4px 0 16px;
+}
+.lx-book-create .lx-input {
+	flex: 1;
+	min-width: 0;
+}
+.lx-mini-btn {
+	background: var(--background-secondary);
+	border: 1px solid var(--lx-border, var(--background-modifier-border));
+	border-radius: 6px;
+	color: var(--text-normal);
+	font-size: 12px;
+	padding: 5px 10px;
+	cursor: pointer;
+}
+.lx-dict-row.lx-drag-src {
+	opacity: 0.45;
+}
+.lx-dict-row[draggable="true"] {
+	cursor: grab;
+}
+.lingua-nex-fbar .lx-fbar-btn.lx-fbar-ai {
+	color: var(--lx-accent);
+	border-color: color-mix(in srgb, var(--lx-accent) 45%, transparent);
+}
+
+/* ---------- AI 流式渲染区与分隔条 ---------- */
+.lingua-nex-panel .lx-divider {
+	height: 8px;
+	flex-shrink: 0;
+	position: relative;
+	z-index: 4;
+	background-color: color-mix(in srgb, var(--lx-border) 45%, transparent);
+	border-top: 1px solid var(--lx-border);
+	border-bottom: 1px solid var(--lx-border);
+	user-select: none;
+}
+.lingua-nex-panel .lx-divider.hidden {
+	display: none;
+}
+
+/* 纯视觉分隔线：位于词典全文与 AI 区之间，AI 区内容自适应、高度不限 */
+.lingua-nex-panel .lx-divider::after {
+	content: "";
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: 26px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--text-faint);
+	opacity: 0.6;
+}
+
+.lingua-nex-panel .lx-ai-scroll {
+	/* 内容自适应：不内部滚动，AI 回答整体展开，超高交给 lx-content-inner 统一滚动 */
+	flex: 0 0 auto;
+	overflow: visible;
+	padding-right: 2px;
+}
+
+.lingua-nex-panel .lx-ai-holder .lx-ai-md {
+	overflow-wrap: break-word;
+}
+
+/* 追问条（第三个独立板块）：挂在 contentWrap 底部，与词典区/AI 区平级，不参与 AI 区高度分配 */
+.lingua-nex-panel .lx-ai-ask {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 12px 10px;
+	margin-top: 8px;
+	border-top: 1px solid var(--lx-border);
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+}
+.lingua-nex-panel .lx-ai-ask-input {
+	flex: 1;
+	min-width: 0;
+	font-size: 12px;
+	padding: 4px 9px;
+	border-radius: 999px;
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	outline: none;
+}
+.lingua-nex-panel .lx-ai-ask-input:focus {
+	border-color: var(--lx-accent);
+}
+.lingua-nex-panel .lx-ai-ask-btn {
+	flex-shrink: 0;
+	font-size: 11px;
+	padding: 3px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--lx-accent);
+	color: var(--lx-accent);
+	background: transparent;
+	cursor: pointer;
+}
+.lingua-nex-panel .lx-ai-follow {
+	border-top: 1px dashed var(--lx-border);
+	padding-top: 8px;
+	margin-top: 8px;
+}
+
+.lingua-nex-panel .lx-ai-holder .lx-ai-md p {
+	margin: 4px 0;
+}
+
+.lingua-nex-panel .lx-ai-holder .lx-ai-md ul,
+.lingua-nex-panel .lx-ai-holder .lx-ai-md ol {
+	margin: 4px 0;
+	padding-left: 22px;
+}
+
+.lingua-nex-panel .lx-ai-streaming {
+	position: relative;
+	opacity: 0.72;
+}
+.lingua-nex-panel .lx-ai-streaming::after {
+	content: "▍";
+	display: inline-block;
+	animation: lx-blink 0.9s steps(2, start) infinite;
+	color: var(--lx-accent);
+}
+@keyframes lx-blink {
+	50% {
+		opacity: 0;
+	}
+}
+
+/* ---------- 悬浮窗（hover 查词）：简洁无阴影 ---------- */
+.lx-hover-pop {
+	position: fixed;
+	z-index: var(--layer-popover, 1000);
+	min-width: 220px;
+	max-width: min(320px, calc(100vw - 24px));
+	padding: 8px 10px;
+	background: var(--background-primary);
+	border: 1px solid var(--lx-border);
+	border-radius: 8px;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(3px);
+	transition: opacity 0.14s ease, transform 0.14s ease;
+	/* 刻意无 box-shadow：保持面板一贯的干净风格 */
+}
+.lx-hover-pop.shown {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateY(0);
+}
+.lx-hover-pop .lx-hover-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+.lx-hover-pop .lx-hover-word {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--lx-accent);
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.lx-hover-pop .lx-hover-frame {
+	width: 100%;
+	height: 220px;
+	border: 1px solid var(--lx-border);
+	border-radius: 6px;
+	background: #fff;
+	display: block;
+}
+.lx-hover-pop .lx-hover-close {
+	color: var(--text-muted);
+	font-size: 13px;
+}
+.lx-hover-pop .lx-hover-foot {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+/* ---------- 生词复习：列表 + 卡片 ---------- */
+.lx-review-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 0 10px;
+	flex-wrap: wrap;
+}
+.lx-review-toolbar .lx-select {
+	max-width: 180px;
+	font-size: 12.5px;
+}
+.lx-mini-btn {
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 12px;
+	line-height: 1;
+	padding: 5px 10px;
+	border-radius: 6px;
+	cursor: pointer;
+}
+.lx-mini-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.lx-mini-btn.on {
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 10%, transparent);
+}
+.lx-review-body {
+	min-height: 120px;
+}
+
+.lx-word-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.lx-word-row {
+	border: 1px solid var(--lx-border);
+	border-radius: 8px;
+	padding: 6px 8px;
+	background: var(--background-primary);
+	transition: transform 0.16s ease;
+}
+.lx-word-row.pop {
+	transform: translateX(6px);
+}
+.lx-word-head {
+	cursor: pointer;
+}
+.lx-word-head .lx-icon-btn {
+	float: left;
+	margin-right: 4px;
+}
+.lx-word {
+	font-weight: 600;
+	font-size: 13.5px;
+	color: var(--lx-accent);
+	margin-right: 8px;
+}
+.lx-word-meta {
+	font-size: 10.5px;
+	color: var(--text-faint);
+}
+.lx-word-def {
+	margin-top: 4px;
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--text-muted);
+	overflow-wrap: break-word;
+	max-height: none;
+}
+.lx-word-def.collapsed {
+	max-height: 2.6em;
+	overflow: hidden;
+	-webkit-line-clamp: 2;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+}
+.lx-word-ops {
+	display: flex;
+	gap: 4px;
+	margin-top: 6px;
+	flex-wrap: wrap;
+}
+.lx-rbtn {
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 11.5px;
+	line-height: 1;
+	padding: 5px 10px;
+	border-radius: 999px;
+	cursor: pointer;
+	transition: all 0.12s ease;
+}
+.lx-rbtn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.lx-rbtn.mini {
+	padding: 4px 9px;
+	font-size: 11px;
+}
+.lx-rbtn.mini.danger {
+	border-color: color-mix(in srgb, var(--text-error, #e1484d) 55%, transparent);
+	color: var(--text-error, #e1484d);
+}
+.lx-rbtn.lx-next {
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+	background: color-mix(in srgb, var(--lx-accent) 8%, transparent);
+}
+.lx-review-card {
+	border: 1px solid var(--lx-border);
+	border-radius: 10px;
+	padding: 16px;
+	background: var(--background-primary);
+	position: relative;
+	transition: transform 0.16s ease;
+}
+.lx-review-card.pop {
+	transform: translateX(6px);
+}
+.lx-review-word {
+	font-size: 22px;
+	font-weight: 700;
+	color: var(--lx-accent);
+	display: inline-block;
+	margin-right: 8px;
+}
+.lx-review-def {
+	margin-top: 10px;
+	font-size: 13px;
+	line-height: 1.7;
+	color: var(--text-normal);
+	overflow-wrap: break-word;
+	cursor: pointer;
+}
+.lx-review-def.collapsed {
+	max-height: 2.4em;
+	overflow: hidden;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+}
+.lx-review-btns {
+	display: flex;
+	gap: 8px;
+	margin-top: 14px;
+	flex-wrap: wrap;
+}
+.lx-review-count {
+	font-size: 11px;
+	color: var(--text-faint);
+	margin-top: 8px;
+}
+.lx-review-done {
+	color: var(--text-muted);
+	font-size: 14px;
+}
+.lx-review-def .hidden,
+.lx-review-btns .hidden,
+.lx-rbtn.hidden {
+	display: none !important;
+}
+
+/* 确认弹窗 */
+.lx-confirm p {
+	margin: 0 0 12px;
+	color: var(--text-muted);
+	font-size: 13.5px;
+	line-height: 1.6;
+}
+.lx-confirm-ops {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+.lx-confirm-ops button {
+	cursor: pointer;
+}
+
+/* ===== 复习页释义面板：按钮展开 + 本地/有道/AI 源切换 ===== */
+.lx-def-host {
+	display: none;
+}
+.lx-def-host.open {
+	display: block;
+}
+.lx-def-toggle {
+	display: inline-block;
+	margin: 6px 0 2px;
+	padding: 3px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary-alt);
+	color: var(--text-normal);
+	font-size: 0.8em;
+	cursor: pointer;
+}
+.lx-def-toggle:hover {
+	background: var(--background-modifier-hover);
+}
+.lx-def-panel {
+	margin: 6px 0 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--background-primary);
+}
+.lx-def-srcbar {
+	display: flex;
+	gap: 4px;
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	flex-wrap: wrap;
+}
+.lx-def-src {
+	padding: 3px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 0.78em;
+	cursor: pointer;
+}
+.lx-def-src:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+.lx-def-src.on {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.lx-def-content {
+	padding: 8px 10px;
+	max-height: 420px;
+	overflow-y: auto;
+	font-size: 0.88em;
+	line-height: 1.5;
+	color: var(--text-normal);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.lx-def-content.loading {
+	color: var(--text-muted);
+	font-style: italic;
+}
+.lx-def-content.loading::after {
+	content: "加载中…";
+}
+/* v0.6.7：释义渲染复用查词面板 iframe 管线（样式隔离，有道完整 HTML 不再注入页面） */
+.lx-def-iframe {
+	width: 100%;
+	border: none;
+	display: block;
+	background: #fff;
+	height: 0;
+	min-height: 0;
+}
+.lx-def-iframe.hidden {
+	display: none;
+}
+.lx-def-text.hidden {
+	display: none;
+}
+/* 列表模式：已复习过的词显示已学徽章 */
+.lx-learned {
+	font-size: 10.5px;
+	color: var(--lx-accent);
+	border: 1px solid color-mix(in srgb, var(--lx-accent) 55%, transparent);
+	border-radius: 999px;
+	padding: 0 5px;
+	margin-right: 6px;
+	vertical-align: 1px;
+}
+/* 卡片模式：评级后的记忆曲线状态 */
+.lx-review-meta.lx-review-status {
+	color: var(--lx-accent);
+	font-weight: 600;
+}
+.lx-review-meta {
+	margin: 2px 0 4px;
+	font-size: 0.78em;
+	color: var(--text-muted);
+}
+.lx-review-word {
+	font-size: 1.6em;
+	font-weight: 700;
+}
+
+/* ---------- 设置页帮助抽屉：从下往上弹出，约 60% 屏高，列表滑动查看 ---------- */
+.lx-help-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: calc(var(--layer-modal, 1000) - 1);
+	background: rgba(0, 0, 0, 0.38);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.22s ease;
+}
+.lx-help-backdrop.shown {
+	opacity: 1;
+	pointer-events: auto;
+}
+.lx-help-drawer {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: var(--layer-modal, 1000);
+	height: 60vh;
+	max-height: 60vh;
+	display: flex;
+	flex-direction: column;
+	background: var(--background-primary);
+	border-radius: 14px 14px 0 0;
+	border-top: 1px solid var(--lx-border);
+	box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.28);
+	transform: translateY(100%);
+	transition: transform 0.26s ease;
+}
+.lx-help-drawer.shown {
+	transform: translateY(0);
+}
+.lx-help-drawer-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 12px 14px;
+	padding-bottom: max(10px, env(safe-area-inset-bottom));
+	border-bottom: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	flex-shrink: 0;
+}
+.lx-help-drawer-title {
+	font-weight: 600;
+	font-size: 14px;
+	color: var(--lx-accent);
+}
+.lx-help-drawer-body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior: contain;
+	padding: 2px 16px max(20px, env(safe-area-inset-bottom));
+}
+.lx-help-drawer h4.lx-help-h4 {
+	margin: 18px 0 6px;
+	font-size: 1.05em;
+	color: var(--lx-accent);
+	border-bottom: 1px solid var(--lx-border);
+	padding-bottom: 4px;
+}
+.lx-help-drawer p.lx-help-p {
+	margin: 6px 0;
+	font-size: 0.92em;
+	line-height: 1.6;
+	color: var(--text-normal);
+}
+.lx-help-drawer ul.lx-help-ul {
+	margin: 4px 0 8px;
+	padding-left: 20px;
+}
+.lx-help-drawer ul.lx-help-ul li {
+	margin: 4px 0;
+	font-size: 0.9em;
+	line-height: 1.55;
+}
+
+/* v0.8.5：下一词按钮移至「收起释义」按钮右侧同一行 */
+.lx-rbtn.lx-next {
+	margin-left: 10px;
+	vertical-align: middle;
+	padding: 3px 12px;
+	border-radius: 6px;
+	font-size: 12px;
+}
+
+/* ===== 复习数据面板（按到期日由近到远，固定高度可滑动） ===== */
+.lx-plan-summary {
+	font-size: 12px;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+	font-weight: 600;
+}
+.lx-plan-list {
+	max-height: 320px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-right: 4px;
+}
+.lx-plan-group {
+	border: 1px solid var(--lx-border);
+	border-radius: 8px;
+	padding: 6px 8px;
+	background: var(--background-primary);
+}
+.lx-plan-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 12px;
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+.lx-plan-date {
+	color: var(--lx-accent);
+}
+.lx-plan-count {
+	color: var(--text-faint);
+}
+.lx-plan-words {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.lx-plan-word {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 3px 4px;
+	border-radius: 4px;
+	background: var(--background-secondary-alt);
+	font-size: 12.5px;
+}
+.lx-plan-word .lx-word {
+	margin: 0;
+}
+.lx-plan-tag {
+	font-size: 10.5px;
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+/* ===== 算法参数设置折叠面板 ===== */
+.lx-algo {
+	margin-top: 14px;
+	border-top: 1px dashed var(--lx-border);
+	padding-top: 8px;
+}
+.lx-algo-head {
+	width: 100%;
+	text-align: left;
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-size: 12.5px;
+	cursor: pointer;
+	padding: 4px 2px;
+}
+.lx-algo-head:hover {
+	color: var(--lx-accent);
+}
+.lx-algo-box {
+	display: none;
+}
+.lx-algo-box.open {
+	display: block;
+}
+.lx-algo-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 8px 0;
+}
+.lx-algo-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.lx-algo-label {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+}
+.lx-algo-label span {
+	font-size: 12.5px;
+	font-weight: 600;
+}
+.lx-algo-label small {
+	font-size: 10.5px;
+	color: var(--text-faint);
+}
+.lx-algo-input {
+	width: 76px;
+	text-align: right;
+}
+.lx-algo-ops {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}

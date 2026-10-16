@@ -1,0 +1,932 @@
+import { ItemView, WorkspaceLeaf, Modal, Notice, Setting, App, MarkdownRenderer, Component } from "obsidian";
+import type LinguaNexPlugin from "../main";
+import type { LinguaNexMdict } from "../core/mdict";
+import type { DictItem, LinguaNexSettings } from "../settings";
+import { applyRating, sortByDue, DEFAULT_REVIEW, type ReviewConfig } from "../core/vocab";
+import type { VocabEntry } from "../core/vocab";
+import { aiLookupStream } from "../core/ai";
+
+/** 通用删除/危险操作确认弹窗；确认后执行回调 */
+class ConfirmModal extends Modal {
+	constructor(
+		app: App,
+		private title: string,
+		private message: string,
+		private onConfirm: () => Promise<void>,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.titleEl.setText(this.title);
+		const box = this.contentEl.createDiv({ cls: "lx-confirm" });
+		box.createEl("p", { text: this.message });
+		const ops = box.createDiv({ cls: "lx-confirm-ops" });
+		const ok = ops.createEl("button", { cls: "mod-cta", text: "确认" });
+		ok.addEventListener("click", async () => {
+			this.close();
+			try {
+				await this.onConfirm();
+			} catch (e: any) {
+				new Notice(`操作失败：${e?.message ?? "未知错误"}`);
+			}
+		});
+		const cancel = ops.createEl("button", { text: "取消" });
+		cancel.addEventListener("click", () => this.close());
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+export const DICT_MANAGER_VIEW = "lingua-nex-manager";
+export const VOCAB_REVIEW_VIEW = "lingua-nex-review";
+
+/** 词典管理视图：词典列表 + 生词本管理 */
+export class DictManagerView extends ItemView {
+	constructor(
+		leaf: WorkspaceLeaf,
+		private plugin: LinguaNexPlugin,
+	) {
+		super(leaf);
+	}
+
+	getViewType(): string {
+		return DICT_MANAGER_VIEW;
+	}
+
+	getDisplayText(): string {
+		return "LinguaNex · 词典管理";
+	}
+
+	getIcon(): string {
+		return "book-open";
+	}
+
+	async onOpen(): Promise<void> {
+		this.render();
+	}
+
+	async onClose(): Promise<void> {}
+
+	private render(): void {
+		const root = this.contentEl;
+		root.empty();
+		root.addClass("lingua-nex-manager");
+
+		root.createEl("h3", { text: "词典书架" });
+		// 本地词典与在线词典并入同一列表，按真实优先级降序显示（与设置页一致，可统一 ↑↓ 排序）
+		const onlineMeta: Record<string, string> = {
+			youdao: "dict.youdao.com · 联网查中文释义与英/美发音",
+			freeDict: "dictionaryapi.dev · 联网查英文释义与发音",
+		};
+		type ShelfRow = {
+			kind: "local" | "online";
+			key: string;
+			name: string;
+			enabled: boolean;
+			priority: number;
+			meta: string;
+			local?: DictItem;
+		};
+		const rows: ShelfRow[] = [
+			...this.plugin.settings.dictionaries.map((d) => ({
+				kind: "local" as const,
+				key: d.path,
+				name: d.name,
+				enabled: d.enabled,
+				priority: d.priority,
+				meta: "",
+				local: d,
+			})),
+			...(Object.keys(this.plugin.settings.online) as (keyof LinguaNexSettings["online"])[]).map(
+				(key) => {
+					const cfg = this.plugin.settings.online[key];
+					return {
+						kind: "online" as const,
+						key,
+						name: key === "youdao" ? "有道词典（在线）" : "Free Dictionary（在线）",
+						enabled: cfg.enabled,
+						priority: cfg.priority,
+						meta: onlineMeta[key] ?? "",
+					};
+				},
+			),
+		].sort((a, b) => b.priority - a.priority);
+		if (!rows.length) {
+			root.createEl("p", {
+				text: "暂无词典，请在设置中添加词典目录并扫描。",
+				cls: "lingua-nex-empty",
+			});
+		} else {
+			const shelf = root.createDiv({ cls: "lx-shelf" });
+			for (const r of rows) {
+				const card = shelf.createDiv({
+					cls: "lx-shelf-card" + (r.enabled ? " on" : ""),
+				});
+				const titleWrap = card.createDiv({ cls: "lx-shelf-title-row" });
+				titleWrap.createDiv({ cls: "lx-shelf-title", text: r.name });
+				if (r.kind === "online") {
+					titleWrap.createSpan({ cls: "lx-online-tag", text: "online" });
+				}
+				const meta = r.kind === "local" && r.local
+					? (() => {
+							const loaded = this.plugin.loadedDicts.find(
+								(m) => m.dictPath === r.key,
+							);
+							return loaded
+								? `${loaded.info.wordCount.toLocaleString()} 词条 · 载入 ${loaded.info.initMs}ms`
+								: "未加载";
+						})()
+					: r.meta;
+				card.createDiv({ cls: "lx-shelf-meta", text: meta });
+				const ops = card.createDiv({ cls: "lx-shelf-ops" });
+				const en = ops.createEl("button", {
+					cls: "lx-sort-btn" + (r.enabled ? " on" : ""),
+					text: r.enabled ? "启用" : "停用",
+				});
+				en.title = "启用/停用";
+				en.addEventListener("click", async () => {
+					if (r.kind === "local" && r.local) {
+						r.local.enabled = !r.local.enabled;
+						await this.plugin.saveSettings();
+						await this.plugin.reloadDictionaries();
+					} else {
+						const cfg = this.plugin.settings.online[r.key as keyof LinguaNexSettings["online"]];
+						cfg.enabled = !cfg.enabled;
+						await this.plugin.saveSettings();
+					}
+					this.render();
+				});
+				const up = ops.createEl("button", { cls: "lx-sort-btn", text: "↑" });
+				up.title = "上移";
+				up.addEventListener("click", () =>
+					void this.moveRow(rows, r, -1),
+				);
+				const down = ops.createEl("button", { cls: "lx-sort-btn", text: "↓" });
+				down.title = "下移";
+				down.addEventListener("click", () =>
+					void this.moveRow(rows, r, 1),
+				);
+				if (r.kind === "local" && r.local) {
+					const del = ops.createEl("button", {
+						cls: "lx-sort-btn lx-danger",
+						text: "✕",
+					});
+					del.title = "移出书架（不删除文件）";
+					del.addEventListener("click", async () => {
+						new ConfirmModal(
+							this.app,
+							"移出词典",
+							`确定将「${r.name}」移出书架吗？仅移除配置，不会删除词典文件。`,
+							async () => {
+								this.plugin.settings.dictionaries =
+									this.plugin.settings.dictionaries.filter(
+										(x) => x.path !== r.key,
+									);
+								await this.plugin.saveSettings();
+								await this.plugin.reloadDictionaries();
+								this.render();
+							},
+						).open();
+					});
+				}
+			}
+		}
+
+		root.createEl("h3", { text: "生词本书架" });
+		void this.renderBooks(root);
+	}
+
+	/** 书架内上下移动调整优先级（本地/在线统一），越靠前查词越优先 */
+	private async moveRow(
+		rows: { kind: "local" | "online"; key: string; local?: DictItem }[],
+		r: { kind: "local" | "online"; key: string; local?: DictItem },
+		delta: number,
+	): Promise<void> {
+		const i = rows.indexOf(r);
+		const j = i + delta;
+		if (i < 0 || j < 0 || j >= rows.length) return;
+		[rows[i], rows[j]] = [rows[j], rows[i]];
+		rows.forEach((x, idx) => {
+			const p = rows.length - idx;
+			if (x.kind === "local" && x.local) {
+				x.local.priority = p;
+			} else {
+				this.plugin.settings.online[x.key as keyof LinguaNexSettings["online"]].priority = p;
+			}
+		});
+		await this.plugin.saveSettings();
+		await this.plugin.reloadDictionaries();
+		this.render();
+	}
+
+	private async renderBooks(root: HTMLElement): Promise<void> {
+		const books = await this.plugin.vocab.books();
+		const shelf = root.createDiv({ cls: "lx-shelf" });
+		if (!books.length) {
+			shelf.createEl("p", {
+				text: "暂无生词本，创建一个开始积累词汇。",
+				cls: "lingua-nex-empty",
+			});
+		}
+		for (const b of books) {
+			const entries = await this.plugin.vocab.entries(b);
+			const card = shelf.createDiv({ cls: "lx-shelf-card book" });
+			card.createDiv({ cls: "lx-shelf-title", text: b });
+			card.createDiv({ cls: "lx-shelf-meta", text: `${entries.length} 词` });
+			card.setAttr("title", "点击进入该生词本复习");
+			// 点击卡片：自动跳转到生词复习页并加载该生词本
+			card.addEventListener("click", () => {
+				void this.plugin.openReview(b);
+			});
+			const ops = card.createDiv({ cls: "lx-shelf-ops" });
+			const del = ops.createEl("button", {
+				cls: "lx-sort-btn lx-danger",
+				text: "删除",
+			});
+			del.addEventListener("click", async (e) => {
+				e.stopPropagation();
+				new ConfirmModal(
+					this.app,
+					"删除生词本",
+					`确定删除生词本「${b}」及其全部词条吗？此操作不可恢复。`,
+					async () => {
+						await this.plugin.vocab.deleteBook(b);
+						this.render();
+					},
+				).open();
+			});
+		}
+		const createRow = root.createDiv({ cls: "lx-book-create" });
+		const input = createRow.createEl("input", {
+			cls: "lx-input",
+			attr: { placeholder: "新生词本名称" },
+		});
+		const btn = createRow.createEl("button", { cls: "lx-mini-btn", text: "新建" });
+		btn.addEventListener("click", async () => {
+			const name = input.value.trim();
+			if (!name) return;
+			await this.plugin.vocab.createBook(name);
+			this.render();
+		});
+	}
+}
+
+/** 生词学习视图：卡片流 + 三键评级 */
+export class VocabReviewView extends ItemView {
+	constructor(
+		leaf: WorkspaceLeaf,
+		private plugin: LinguaNexPlugin,
+	) {
+		super(leaf);
+	}
+
+	getViewType(): string {
+		return VOCAB_REVIEW_VIEW;
+	}
+
+	getDisplayText(): string {
+		return "LinguaNex · 生词复习";
+	}
+
+	getIcon(): string {
+		return "cards";
+	}
+
+	async onOpen(): Promise<void> {
+		// 从词典管理书架跳转进入时，消费待打开的生词本
+		if (this.plugin.pendingReviewBook) {
+			this.book = this.plugin.pendingReviewBook;
+			this.plugin.pendingReviewBook = "";
+		}
+		this.render();
+	}
+
+	async onClose(): Promise<void> {}
+
+	private mode: "list" | "deck" | "plan" = "list";
+	/** plan 之前的模式：点「复习数据」后切回时恢复 */
+	private prevMode: "list" | "deck" = "list";
+	private reviewScope: "due" | "all" = "due";
+	/** 当前复习生词本；为空时回落到默认生词本 */
+	private book = "";
+
+	/** 复习算法参数（settings.vocab.review，保证字段完整） */
+	private get reviewCfg(): ReviewConfig {
+		const r = this.plugin.settings.vocab?.review;
+		return { ...DEFAULT_REVIEW, ...(r ?? {}) };
+	}
+
+	private render(): void {
+		const root = this.contentEl;
+		root.empty();
+		root.addClass("lingua-nex-review");
+		root.createEl("h3", { text: "生词复习" });
+		void this.renderToolbar(root);
+	}
+
+	/** 顶部工具栏：选择生词本 + 复习范围 + 列表/卡片切换 */
+	private async renderToolbar(root: HTMLElement): Promise<void> {
+		const books = await this.plugin.vocab.books();
+		if (!books.length) {
+			root.createEl("p", {
+				text: "暂无生词本，查词时点「收藏」即可积累。",
+				cls: "lingua-nex-empty",
+			});
+			return;
+		}
+		const book = this.book || this.plugin.settings.vocab.defaultBook || books[0];
+		const bar = root.createDiv({ cls: "lx-review-toolbar" });
+		const sel = bar.createEl("select", { cls: "lx-select" });
+		for (const b of books) {
+			const opt = sel.createEl("option", { text: b, value: b });
+			opt.selected = b === book;
+		}
+		sel.addEventListener("change", () => {
+			this.book = sel.value;
+			this.plugin.settings.vocab.defaultBook = sel.value;
+			void this.plugin.saveSettings();
+			this.render();
+		});
+		const scopeSel = bar.createEl("select", { cls: "lx-select" });
+		const dueOpt = scopeSel.createEl("option", { text: "到期复习", value: "due" });
+		const allOpt = scopeSel.createEl("option", { text: "全部", value: "all" });
+		dueOpt.selected = this.reviewScope === "due";
+		allOpt.selected = this.reviewScope === "all";
+		scopeSel.addEventListener("change", () => {
+			this.reviewScope = scopeSel.value as "due" | "all";
+			this.render();
+		});
+		// 列表/卡片合一按钮：点击在两种复习模式间切换；plan 模式下点击返回原模式
+		const modeBtn = bar.createEl("button", {
+			cls: "lx-mini-btn",
+			text: "切换：卡片",
+		});
+		// 复习数据按钮：查看未来到期复习计划（由近到远）
+		const planBtn = bar.createEl("button", {
+			cls: "lx-mini-btn",
+			text: "复习数据",
+		});
+		const body = root.createDiv({ cls: "lx-review-body" });
+		const renderMode = (): void => {
+			body.empty();
+			if (this.mode === "plan") {
+				modeBtn.setText(`返回：${this.prevMode === "list" ? "列表" : "卡片"}`);
+				planBtn.addClass("on");
+				void this.renderPlan(body, book);
+			} else {
+				modeBtn.setText(this.mode === "list" ? "切换：卡片" : "切换：列表");
+				planBtn.removeClass("on");
+				void (this.mode === "list"
+					? this.renderList(body, book)
+					: this.renderQueue(body, book, this.reviewScope));
+			}
+		};
+		modeBtn.addEventListener("click", () => {
+			if (this.mode === "plan") {
+				this.mode = this.prevMode;
+			} else {
+				this.prevMode = this.mode;
+				this.mode = this.mode === "list" ? "deck" : "list";
+			}
+			renderMode();
+		});
+		planBtn.addEventListener("click", () => {
+			if (this.mode === "plan") {
+				this.mode = this.prevMode;
+			} else {
+				this.prevMode = this.mode;
+				this.mode = "plan";
+			}
+			renderMode();
+		});
+		renderMode();
+	}
+
+	/** 列表模式：词条一行一条，释义按钮展开/收起，可切换本地/有道/AI 源 */
+	private async renderList(root: HTMLElement, book: string): Promise<void> {
+		// 按复习算法排序：该复习的在前（已到期/未安排），再按到期时间由近到远
+		const entries = sortByDue(await this.plugin.vocab.entries(book));
+		if (!entries.length) {
+			root.createEl("p", {
+				text: "生词本为空，查词时点「收藏」即可积累。",
+				cls: "lingua-nex-empty",
+			});
+			return;
+		}
+		const list = root.createDiv({ cls: "lx-word-list" });
+		// 上一个已评级未沉底的词行：等下一个词评级时再沉底轮转（避免释义还没看就移走）
+		let prevRow: HTMLElement | null = null;
+		for (const e of entries) {
+			const row = list.createDiv({ cls: "lx-word-row" });
+			const head = row.createDiv({ cls: "lx-word-head" });
+			const speak = head.createEl("button", {
+				cls: "lx-icon-btn lx-speak",
+				text: "🔊",
+			});
+			speak.title = "发音";
+			speak.addEventListener("click", (ev) => {
+				ev.stopPropagation();
+				void this.plugin.speakWord(e.word);
+			});
+			head.createSpan({ cls: "lx-word", text: e.word });
+			if ((e.reviewCount ?? 0) > 0) {
+				head.createSpan({ cls: "lx-learned", text: "✓ 已学" });
+			}
+			head.createSpan({
+				cls: "lx-word-meta",
+				text:
+					`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
+					`${proficiencyLabel(e)} · ${dueLabel(e)}`,
+			});
+			const defToggle = row.createEl("button", {
+				cls: "lx-def-toggle",
+				text: "释义 ▾",
+			});
+			const defHost = row.createDiv({ cls: "lx-def-host" });
+			const panel = makeDefPanel(this.plugin, defHost, e);
+			let open = false;
+			defToggle.addEventListener("click", () => {
+				open = !open;
+				defHost.toggleClass("open", open);
+				defToggle.setText(open ? "收起释义 ▴" : "释义 ▾");
+				if (open) void panel.load("local");
+			});
+			const ops = row.createDiv({ cls: "lx-word-ops" });
+			for (const [g, label] of [
+				[0, "忘记"],
+				[1, "模糊"],
+				[2, "认识"],
+			] as const) {
+				const btn = ops.createEl("button", {
+					cls: "lx-rbtn mini",
+					text: label,
+				});
+				btn.addEventListener("click", async () => {
+					await this.plugin.vocab.update(book, e.word, applyRating(e, g, this.reviewCfg));
+					// 评级后自动展开释义，方便核对；不重绘、不移位，保留当前行位置
+					open = true;
+					defHost.addClass("open");
+					defToggle.setText("收起释义 ▴");
+					void panel.load("local");
+					// 上一个已评级词沉底轮转（学过词进入循环队列），带卡片同款轻位移动画
+					if (prevRow && prevRow.isConnected) {
+						list.appendChild(prevRow);
+						prevRow.removeClass("pop");
+						void prevRow.offsetWidth; // 强制 reflow 重触发过渡
+						prevRow.addClass("pop");
+					}
+					prevRow = row;
+				});
+			}
+			const rm = ops.createEl("button", {
+				cls: "lx-rbtn mini danger",
+				text: "移除",
+			});
+			rm.addEventListener("click", () => {
+				new ConfirmModal(
+					this.app,
+					"移除生词",
+					`确定从「${book}」移除「${e.word}」吗？`,
+					async () => {
+						await this.plugin.vocab.remove(book, e.word);
+						this.render();
+					},
+				).open();
+			});
+		}
+		// 列表底部：折叠的算法参数设置（可配置复习计划与参数）
+		this.renderAlgoSettings(root);
+	}
+
+	/** 卡片复习模式：SM-2 评级；释义默认隐藏，点按钮展开后可切换本地/有道/AI 源 */
+	private async renderQueue(
+		root: HTMLElement,
+		book: string,
+		scope: "due" | "all",
+	): Promise<void> {
+		const entries = scope === "due"
+			? await this.plugin.vocab.dueEntries(book)
+			: await this.plugin.vocab.entries(book);
+		if (!entries.length) {
+			root.createEl("p", {
+				text: scope === "due"
+					? "当前没有到期的生词，可切到「全部」复习任意词。"
+					: "生词本为空，查词时点「收藏」即可积累。",
+				cls: "lingua-nex-done",
+			});
+			return;
+		}
+		// 按复习算法排序：该复习的在前，再按到期时间由近到远
+		const deck = sortByDue(entries);
+		const card = root.createDiv({ cls: "lx-review-card" });
+		const wordEl = card.createEl("div", { cls: "lx-review-word" });
+		const speak = card.createEl("button", {
+			cls: "lx-icon-btn lx-speak",
+			text: "🔊",
+		});
+		speak.title = "发音";
+		const metaEl = card.createEl("div", { cls: "lx-review-meta" });
+		const defToggle = card.createEl("button", {
+			cls: "lx-def-toggle",
+			text: "显示释义 ▾",
+		});
+		// v0.8.5：下一词按钮紧跟释义按钮（同一行右侧），不再位于评级按钮行
+		const nextBtn = card.createEl("button", {
+			cls: "lx-rbtn lx-next",
+			text: "下一词 →",
+		});
+		const defHost = card.createDiv({ cls: "lx-def-host" });
+		const btns = root.createDiv({ cls: "lx-review-btns" });
+		const again = btns.createEl("button", { cls: "lx-rbtn", text: "忘记" });
+		const hard = btns.createEl("button", { cls: "lx-rbtn", text: "模糊" });
+		const good = btns.createEl("button", { cls: "lx-rbtn", text: "认识" });
+		const counter = root.createEl("div", { cls: "lx-review-count" });
+
+		let idx = 0;
+		let panel: { load: (source: string) => Promise<void> } | null = null;
+		let defOpen = false;
+		// 评级后下一词按钮常驻：收起释义不再连带隐藏（v0.8.3）
+		let graded = false;
+		let autoTimer: number | null = null;
+		const clearAuto = (): void => {
+			if (autoTimer != null) {
+				window.clearTimeout(autoTimer);
+				autoTimer = null;
+			}
+		};
+		const show = async (i: number) => {
+			clearAuto();
+			if (i >= deck.length) {
+				root.empty();
+				root.createEl("p", {
+					text: `本轮复习完成，共 ${deck.length} 词。明天再来吧。`,
+					cls: "lingua-nex-done",
+				});
+				return;
+			}
+			const e = deck[i];
+			wordEl.textContent = e.word;
+			speak.onclick = () => void this.plugin.speakWord(e.word);
+			metaEl.textContent = `${proficiencyLabel(e)} · 下次 ${
+				e.nextReview ? new Date(e.nextReview).toLocaleDateString() : "随时"
+			}`;
+			metaEl.removeClass("lx-review-status");
+			graded = false;
+			defHost.empty();
+			defOpen = false;
+			defHost.removeClass("open");
+			defToggle.setText("显示释义 ▾");
+			panel = makeDefPanel(this.plugin, defHost, e);
+			again.classList.remove("hidden");
+			hard.classList.remove("hidden");
+			good.classList.remove("hidden");
+			nextBtn.classList.add("hidden");
+			counter.textContent = `${i + 1} / ${deck.length}`;
+			card.addClass("pop");
+			window.setTimeout(() => card.removeClass("pop"), 300);
+		};
+		defToggle.addEventListener("click", () => {
+			defOpen = !defOpen;
+			defHost.toggleClass("open", defOpen);
+			defToggle.setText(defOpen ? "收起释义 ▴" : "显示释义 ▾");
+			if (defOpen && panel) void panel.load("local");
+		// 展开释义后可直接点「下一词」切换（浏览模式无需评级）；评级后收起释义不再连带隐藏
+		if (!graded) nextBtn.classList.toggle("hidden", !defOpen);
+		});
+		const grade = async (g: 0 | 1 | 2) => {
+			const e = deck[idx];
+			const updated = applyRating(e, g, this.reviewCfg);
+			await this.plugin.vocab.update(book, e.word, updated);
+			if (g === 0) deck.push({ ...updated }); // 忘记：本轮末尾再复习一次
+			// 评级即自动展开释义：立即看到词义，不再只有按钮闪一下
+			defOpen = true;
+			defHost.addClass("open");
+			defToggle.setText("收起释义 ▴");
+			if (panel) void panel.load("local");
+			// 已学标记 + 记忆曲线状态：熟练度、间隔天数、下次复习日期
+			metaEl.textContent =
+				`✓ 已学 · ${proficiencyLabel(updated)} · ` +
+				`${updated.interval} 天后复习（${
+					updated.nextReview
+						? new Date(updated.nextReview).toLocaleDateString()
+						: "随时"
+				}）`;
+			metaEl.addClass("lx-review-status");
+			again.classList.add("hidden");
+			hard.classList.add("hidden");
+			good.classList.add("hidden");
+			graded = true;
+			nextBtn.classList.remove("hidden");
+			card.scrollIntoView({ behavior: "smooth", block: "start" });
+			// 不自动跳卡：展开释义后停留，卡片需要多看一会，看完再点「下一词 →」手动切换
+			clearAuto();
+		};
+		again.addEventListener("click", () => void grade(0));
+		hard.addEventListener("click", () => void grade(1));
+		good.addEventListener("click", () => void grade(2));
+		nextBtn.addEventListener("click", () => {
+			clearAuto();
+			idx += 1;
+			void show(idx);
+		});
+		void show(0);
+	}
+
+	/** 复习数据：按复习日期由近到远展示待复习生词（固定高度可滑动），并汇总数量 */
+	private async renderPlan(root: HTMLElement, book: string): Promise<void> {
+		const cfg = this.reviewCfg;
+		const groups = await this.plugin.vocab.schedule(book, cfg.planDays);
+		if (!groups.length) {
+			root.createEl("p", {
+				text: "生词本为空，暂无复习计划。",
+				cls: "lingua-nex-empty",
+			});
+			return;
+		}
+		const dueCount = groups
+			.filter((g) => g.dayOffset <= 0)
+			.reduce((s, g) => s + g.count, 0);
+		const total = groups.reduce((s, g) => s + g.count, 0);
+		root.createEl("div", {
+			cls: "lx-plan-summary",
+			text: `现在待复习 ${dueCount} 词 · 未来 ${cfg.planDays} 天共 ${total} 词`,
+		});
+		// 固定高度列表，可滑动查看
+		const list = root.createDiv({ cls: "lx-plan-list" });
+		for (const g of groups) {
+			const group = list.createDiv({ cls: "lx-plan-group" });
+			const head = group.createDiv({ cls: "lx-plan-head" });
+			head.createSpan({ cls: "lx-plan-date", text: g.label });
+			head.createSpan({ cls: "lx-plan-count", text: `${g.count} 词` });
+			const words = group.createDiv({ cls: "lx-plan-words" });
+			for (const e of g.entries) {
+				const row = words.createDiv({ cls: "lx-plan-word" });
+				row.createSpan({ cls: "lx-word", text: e.word });
+				row.createSpan({ cls: "lx-plan-tag", text: proficiencyLabel(e) });
+			}
+		}
+		// 复习数据面板底部：折叠的算法参数设置（可直接展开改参）
+		this.renderAlgoSettings(root);
+	}
+
+	/** 算法参数设置：折叠面板，按 SM-2 算法可调参数配置复习计划 */
+	private renderAlgoSettings(root: HTMLElement): void {
+		const wrap = root.createDiv({ cls: "lx-algo" });
+		const head = wrap.createEl("button", {
+			cls: "lx-algo-head",
+			text: "⚙ 算法参数设置 ▸",
+		});
+		const box = wrap.createDiv({ cls: "lx-algo-box" });
+		let open = false;
+		head.addEventListener("click", () => {
+			open = !open;
+			box.toggleClass("open", open);
+			head.setText(open ? "⚙ 算法参数设置 ▾" : "⚙ 算法参数设置 ▸");
+		});
+
+		const cfg = this.reviewCfg;
+		const fields: {
+			key: keyof ReviewConfig;
+			label: string;
+			desc: string;
+			min: number;
+			step: number;
+		}[] = [
+			{ key: "intervalNew", label: "陌生间隔（天）", desc: "评级「忘记」后下次复习间隔", min: 0.5, step: 0.5 },
+			{ key: "intervalFamiliar", label: "渐熟间隔（天）", desc: "晋级渐熟后下次复习间隔", min: 1, step: 1 },
+			{ key: "intervalKnown", label: "熟悉间隔（天）", desc: "晋级熟悉后下次复习间隔", min: 1, step: 1 },
+			{ key: "easeStep", label: "认识 +难度", desc: "认识评级 easeFactor 增加步长", min: 0.05, step: 0.05 },
+			{ key: "easePenalty", label: "忘记 -难度", desc: "忘记评级 easeFactor 扣减量", min: 0.05, step: 0.05 },
+			{ key: "hardStreak", label: "模糊晋级连对", desc: "模糊评级连续答对次数后晋级渐熟", min: 1, step: 1 },
+			{ key: "goodStreak", label: "认识晋级连对", desc: "认识评级连续答对次数后晋级熟悉", min: 1, step: 1 },
+			{ key: "planDays", label: "计划展示天数", desc: "复习数据面板展示的未来天数", min: 7, step: 1 },
+		];
+		const grid = box.createDiv({ cls: "lx-algo-grid" });
+		const inputs: HTMLInputElement[] = [];
+		for (const f of fields) {
+			const row = grid.createDiv({ cls: "lx-algo-row" });
+			const lab = row.createDiv({ cls: "lx-algo-label" });
+			lab.createSpan({ text: f.label });
+			lab.createEl("small", { text: f.desc });
+			const input = row.createEl("input", {
+				cls: "lx-algo-input",
+				attr: { type: "number", min: String(f.min), step: String(f.step) },
+			});
+			(input as HTMLInputElement).value = String((cfg as unknown as Record<string, number>)[f.key]);
+			inputs.push(input as HTMLInputElement);
+		}
+		const ops = box.createDiv({ cls: "lx-algo-ops" });
+		const save = ops.createEl("button", { cls: "mod-cta", text: "保存参数" });
+		const reset = ops.createEl("button", { text: "恢复默认" });
+		save.addEventListener("click", async () => {
+			const next: ReviewConfig = { ...cfg };
+			fields.forEach((f, i) => {
+				const v = Number(inputs[i]?.value);
+				if (!Number.isNaN(v) && v >= f.min) {
+					(next as unknown as Record<string, number>)[f.key] = v;
+				}
+			});
+			this.plugin.settings.vocab = {
+				...this.plugin.settings.vocab,
+				review: next,
+			};
+			await this.plugin.saveSettings();
+			new Notice("复习算法参数已保存");
+			this.render();
+		});
+		reset.addEventListener("click", async () => {
+			this.plugin.settings.vocab = {
+				...this.plugin.settings.vocab,
+				review: { ...DEFAULT_REVIEW },
+			};
+			await this.plugin.saveSettings();
+			new Notice("已恢复默认复习参数");
+			this.render();
+		});
+	}
+}
+
+/** 下次复习倒计时标签 */
+function dueLabel(e: VocabEntry, now = Date.now()): string {
+	if (e.nextReview === undefined) return "未安排 · 随时可复习";
+	if (e.nextReview <= now) return "已到期 · 今天该复习";
+	const days = Math.ceil((e.nextReview - now) / 86400000);
+	return `${days === 1 ? "明天" : `${days} 天后`}复习 · ${new Date(e.nextReview).toLocaleDateString()}`;
+}
+
+/** 熟练度中文标签 */
+function proficiencyLabel(e: VocabEntry): string {
+	const p = e.proficiency ?? 0;
+	return p === 0 ? "陌生" : p === 1 ? "渐熟" : "熟悉";
+}
+
+/**
+ * 释义面板：顶部源切换按钮（本地词典 / 有道 / AI），点击展开后切换来源。
+ * v0.6.7 起复用查词面板 LookupPanel 渲染管线：本地与有道均渲染进独立 iframe srcdoc，
+ * 与查词面板完全一致（样式隔离，有道完整 HTML 不再注入页面，修复“撑满整页/样式错乱”）。
+ * - local：plugin.lookupDocHtml 复用 buildDoc 完整渲染（内联 CSS、mdd 资源、发音按钮、中文隐藏）
+ * - local：plugin.lookupDocHtml 复用 buildDoc 完整渲染
+ * - 在线各源（有道 / Free Dictionary / 句子翻译）：与查词面板一致，凡启用且按词典管理排序的源全部显示
+ * - ai：aiLookupStream 流式输出并用 Markdown 渲染，未配置 API Key 时给出提示
+ */
+function makeDefPanel(
+	plugin: LinguaNexPlugin,
+	host: HTMLElement,
+	e: VocabEntry,
+): { load: (source: string) => Promise<void> } {
+	const panel = host.createDiv({ cls: "lx-def-panel" });
+	const bar = panel.createDiv({ cls: "lx-def-srcbar" });
+	const content = panel.createDiv({ cls: "lx-def-content" });
+	const textEl = content.createDiv({ cls: "lx-def-text" });
+	const frame = content.createEl("iframe", {
+		cls: "lx-def-iframe",
+		attr: {
+			sandbox: "allow-scripts allow-same-origin",
+			referrerpolicy: "no-referrer",
+		},
+	});
+
+	// 源列表与查词面板同规则：本地词典恒有，在线源按设置启用+排序全显，AI 启用才显示
+	const sources: { id: string; label: string }[] = [
+		{ id: "local", label: "本地词典" },
+	];
+	for (const o of plugin.enabledOnlineSources()) {
+		sources.push({ id: o.id, label: o.name });
+	}
+	if (plugin.settings.ai.enabled) sources.push({ id: "ai", label: "AI" });
+
+	const btns: Record<string, HTMLElement> = {};
+	// 手动切换源：不自动降级，尊重用户选择（未命中时停留显示提示，可自行再点其他源）
+	for (const s of sources) {
+		const b = bar.createEl("button", { cls: "lx-def-src", text: s.label });
+		b.addEventListener("click", () => void load(s.id, false));
+		btns[s.id] = b;
+	}
+
+	// 与查词面板 renderIframe 同款：srcdoc 加载后按内容实际高度撑开 iframe
+	frame.addEventListener("load", () => {
+		try {
+			const docEl = frame.contentDocument?.scrollingElement;
+			if (!docEl) return;
+			const h = Math.ceil(docEl.scrollHeight) || 0;
+			frame.style.height = h > 0 ? `${h}px` : "auto";
+		} catch (err) {
+			/* 跨域/异常时忽略 */
+		}
+	});
+
+	const showFrame = (): void => {
+		textEl.addClass("hidden");
+		frame.removeClass("hidden");
+	};
+	const showText = (): void => {
+		frame.addClass("hidden");
+		textEl.removeClass("hidden");
+	};
+
+	let seq = 0;
+	let localHtml: string | null | undefined;
+	let mdComp: Component | null = null;
+	const load = async (source: string, autoFallback = true): Promise<void> => {
+		const my = ++seq;
+		mdComp?.unload();
+		mdComp = null;
+		for (const k of Object.keys(btns)) btns[k].toggleClass("on", k === source);
+		content.addClass("loading");
+		textEl.addClass("hidden");
+		frame.addClass("hidden");
+		try {
+			if (source === "local") {
+				if (localHtml === undefined) {
+					// 复用查词面板 buildDoc：内联 CSS、mdd 资源、发音按钮、中文隐藏开关
+					localHtml = plugin.lookupDocHtml(e.word) || null;
+				}
+				if (localHtml) {
+					showFrame();
+					frame.srcdoc = localHtml;
+				} else if (autoFallback) {
+					const fb = sources.find((x) => x.id !== "local" && x.id !== "ai");
+					if (fb) void load(fb.id, false);
+				} else {
+					showText();
+					textEl.setText("（本地词典暂无释义，可点上方其他源）");
+				}
+			} else if (source === "ai") {
+				const cfg = plugin.settings.ai;
+				if (!cfg?.apiKey || !cfg?.baseUrl) {
+					showText();
+					textEl.setText("（未配置 AI，请在设置 → AI 中填写 API Key）");
+					return;
+				}
+				showText();
+				textEl.empty();
+				mdComp = new Component();
+				let acc = "";
+				let timer: number | null = null;
+				const paint = async () => {
+					if (my !== seq) return;
+					textEl.empty();
+					await MarkdownRenderer.render(
+						plugin.app,
+						acc || "…",
+						textEl,
+						"",
+						mdComp as Component,
+					);
+				};
+				const stream = await aiLookupStream(
+					cfg,
+					e.word,
+					undefined,
+					"请用中文简明解释这个英文单词：给出词性、核心释义、常用搭配与 1~2 个例句。使用 Markdown，控制在 200 字以内。单词：" + e.word,
+				);
+				for await (const chunk of stream) {
+					if (my !== seq) return;
+					acc += chunk;
+					if (timer == null) {
+						timer = window.setTimeout(() => {
+							timer = null;
+							void paint();
+						}, 90);
+					}
+				}
+				if (timer != null) {
+					window.clearTimeout(timer);
+					timer = null;
+				}
+				await paint();
+				if (!acc) textEl.setText("（AI 未返回内容）");
+			} else {
+				// 在线源（有道 / Free Dictionary / 句子翻译）统一走 queryOnline
+				const r = await plugin.queryOnline(source, e.word);
+				if (my !== seq) return;
+				if (r?.doc) {
+					showFrame();
+					frame.srcdoc = r.doc;
+				} else {
+					showText();
+					textEl.setText("（该在线源未返回结果，可点「AI」尝试）");
+				}
+			}
+		} catch (err: any) {
+			if (my !== seq) return;
+			textEl.setText(`（加载失败：${err?.message ?? "未知错误"}）`);
+		} finally {
+			if (my === seq) content.removeClass("loading");
+		}
+	};
+	return { load };
+}
+
+/** 视图创建工厂 */
+export function makeDictManagerView(leaf: WorkspaceLeaf, plugin: LinguaNexPlugin): DictManagerView {
+	return new DictManagerView(leaf, plugin);
+}
+
+export function makeVocabReviewView(leaf: WorkspaceLeaf, plugin: LinguaNexPlugin): VocabReviewView {
+	return new VocabReviewView(leaf, plugin);
+}
+

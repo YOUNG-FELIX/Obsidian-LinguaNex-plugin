@@ -1,0 +1,1272 @@
+import { MarkdownRenderer, Component } from "obsidian";
+import type LinguaNexPlugin from "../main";
+import type { LinguaNexMdict } from "../core/mdict";
+import type { DictResources } from "../core/resources";
+import { aiLookupStream, type AIConfig, type ChatMessage } from "../core/ai";
+import { playAudioUrl, playMddAudio, speakTTS, extractSoundPath } from "../core/audio";
+import { type YoudaoEntry } from "../core/onlineDict";
+
+export interface LookupSource {
+	id: string;
+	name: string;
+	mdict?: LinguaNexMdict;
+	resources?: DictResources;
+	isAI?: boolean;
+	/** 在线词典源（如有道），无需本地 mdict */
+	isOnline?: boolean;
+	/** 显示优先级：越大越靠前（本地词典 1..N，有道默认 0） */
+	priority?: number;
+}
+
+interface HistoryItem {
+	word: string;
+	sourceId: string;
+	aiHtml?: string;
+}
+
+const MAX_HISTORY = 64;
+
+/** 展示名缩短：去常见后缀，超长截断加省略号 */
+function shortName(name: string, maxLen = 12): string {
+	let s = name.trim();
+	s = s.replace(/\.(mdx|mdd|Mdx|MDX|Mdd|MDD)$/, "");
+	if (s.length <= maxLen) return s;
+	return s.slice(0, Math.max(1, maxLen - 1)) + "…";
+}
+
+function mimeByExt(key: string): string {
+	const ext = "." + (key.split(".").pop() ?? "").toLowerCase();
+	switch (ext) {
+		case ".png":
+			return "image/png";
+		case ".jpg":
+		case ".jpeg":
+			return "image/jpeg";
+		case ".gif":
+			return "image/gif";
+		case ".svg":
+			return "image/svg+xml";
+		case ".css":
+			return "text/css";
+		case ".js":
+			return "text/javascript";
+		case ".mp3":
+			return "audio/mpeg";
+		default:
+			return "application/octet-stream";
+	}
+}
+
+export class LookupPanel {
+	private root: HTMLElement;
+	private backdrop: HTMLElement;
+	private input: HTMLInputElement;
+	private searchMini: HTMLInputElement;
+	private contentWrap: HTMLElement;
+	private contentInner: HTMLElement;
+	private iframe: HTMLIFrameElement;
+	private tabsEl: HTMLElement;
+	private topEl: HTMLElement;
+	/** 顶部插件名+输入框行：悬浮形态收窄后作为常驻拖拽把手 */
+	private headerEl: HTMLElement;
+	private closeBtn: HTMLElement;
+	private prevBtn: HTMLElement;
+	private nextBtn: HTMLElement;
+	private prevWordLabel: HTMLElement;
+	private speakBtn: HTMLElement;
+	private favBtn: HTMLElement;
+	private statusEl: HTMLElement;
+	private statusTag: HTMLElement;
+	private statusCount: HTMLElement;
+	private statusText: HTMLElement;
+	private scrollbarThumb: HTMLElement;
+	private scrollTimer: number | null = null;
+	private divider: HTMLElement | null = null;
+	private aiHolder: HTMLElement | null = null;
+	private aiScroll: HTMLElement | null = null;
+	/** 未命中占位：切源未命中时中间区域也切换显示提示，避免残留上一源内容 */
+	private missEl: HTMLElement | null = null;
+	private aiAskInput: HTMLInputElement | null = null;
+	private aiContext: ChatMessage[] = [];
+	private mdComp: Component | null = null;
+	/** AI 释义缓存：key = 源|单词|提示词，value = 已生成的 Markdown；面板未关闭前切换源复用，不重复请求 */
+	private aiCache = new Map<string, string>();
+
+	private sources: LookupSource[] = [];
+	private activeSourceId = "";
+	private history: HistoryItem[] = [];
+	private histIdx = -1;
+	private currentDoc = "";
+	/** 当前词条的有道在线结果（在线 Tab 查询后记录，供 🔊 发音直接播放 dictvoice） */
+	private currentOnline: YoudaoEntry | null = null;
+	private aiAbort: AbortController | null = null;
+	private shown = false;
+	private sourceSwitchEl: HTMLElement | null = null;
+	private floatClose: HTMLElement;
+	/** 悬浮窗拖动/缩放状态（仅 lx-floating 形态生效，抽屉形态不参与） */
+	private dragState: { pid: number; sx: number; sy: number; ox: number; oy: number } | null = null;
+	private resizeState: { pid: number; dir: string; sx: number; sy: number; r: DOMRect } | null = null;
+	private resizeHandles: HTMLElement[] = [];
+
+	constructor(private plugin: LinguaNexPlugin) {
+		// 顶部下拉抽屉：外部遮罩，点击面板以外区域即收回
+		this.backdrop = document.body.createDiv({ cls: "lingua-nex-backdrop" });
+		this.root = document.body.createDiv({ cls: "lingua-nex-panel" });
+		// 内联 display:none 兜底：插件样式表在 Obsidian 启动时可能晚于构造就绪，
+		// 若仅依赖 CSS 隐藏，首帧会以无样式状态渲染出顶部内容块（启动闪一下）。
+		// 内联样式不依赖 CSS 注入时序，显示前清除即可。
+		this.root.style.display = "none";
+		// 顶部仅保留 header（插件名/输入框/关闭钮）：悬浮形态常驻吸顶不收起；词典 Tab 已移入内容滚动区顶部随内容上走
+		this.topEl = this.root.createDiv({ cls: "lx-top" });
+		const topEl = this.topEl;
+		this.headerEl = topEl.createDiv({ cls: "lx-header" });
+		const header = this.headerEl;
+		header.createSpan({ cls: "lx-title", text: "LinguaNex" });
+		// 顶部原“第几个词 3/4”位置改为显示上一个查的词，点击可切回
+		this.prevWordLabel = header.createEl("button", {
+			cls: "lx-prev-word",
+			attr: { "aria-label": "查看上一个查的词" },
+		});
+		// 顶部大输入框保留作兜底：底部迷你搜索太小或不喜欢时仍可用
+		this.input = header.createEl("input", { cls: "lx-input lx-input-top", attr: { placeholder: "输入单词…", spellcheck: "false" } });
+		this.closeBtn = header.createEl("button", { cls: "lx-icon-btn lx-close", attr: { "aria-label": "关闭" } });
+		this.closeBtn.innerHTML = "✕";
+
+		// 悬浮窗常驻关闭钮：悬浮形态始终显示，兜底随时可关闭
+		this.floatClose = this.root.createDiv({
+			cls: "lx-float-close",
+			attr: { "aria-label": "关闭" },
+		});
+		this.floatClose.innerHTML = "✕";
+
+		this.contentWrap = this.root.createDiv({ cls: "lx-content-wrap" });
+		// 词典 + 分隔线 + AI 区在 inner 内统一滚动：词典全文、AI 回答均为内容自适应高度，超高整体滚动
+		this.contentInner = this.contentWrap.createDiv({ cls: "lx-content-inner" });
+		// 词典切换 Tab 与内容合为一体：作为滚动区顶部第一块，下缘贴内容上缘，滑动时随内容自然上走，无联动动画无遮挡
+		this.tabsEl = this.contentInner.createDiv({ cls: "lx-tabs" });
+		this.iframe = this.contentInner.createEl("iframe", {
+			cls: "lx-iframe",
+			attr: { sandbox: "allow-scripts allow-same-origin", referrerpolicy: "no-referrer" },
+		});
+		this.divider = this.contentInner.createDiv({ cls: "lx-divider" });
+		this.aiHolder = this.contentInner.createDiv({ cls: "lx-ai-holder" });
+		this.aiScroll = this.aiHolder.createDiv({ cls: "lx-ai-scroll" });
+		// 滚动条挂 contentWrap（不随内容滚动），词典滚动统一由 inner 驱动
+		const scrollbar = this.contentWrap.createDiv({ cls: "lx-scrollbar" });
+		this.scrollbarThumb = scrollbar.createDiv({ cls: "lx-scrollbar-thumb" });
+		// 追问条、状态栏是面板固定底部板块，不参与词典/AI 滚动
+		this.buildAskBar();
+		this.buildStatusBar();
+
+		this.bindEvents();
+		this.setupFloatInteractions();
+	}
+
+	/**
+	 * 底部操作栏：按键从顶部下移，贴近拇指更跟手。
+	 * 行1：词典胶囊+词条数（左） → 收藏/喇叭（偏中间） → 迷你搜索（右下角小胶囊）
+	 * 行2：左右切换（上一次/下一次查的词）放在右下角
+	 */
+	private buildStatusBar(): void {
+		this.statusEl = this.root.createDiv({ cls: "lx-status" });
+		const row1 = this.statusEl.createDiv({ cls: "lx-status-row lx-status-row1" });
+		this.statusTag = row1.createSpan({ cls: "lx-tag", text: "" });
+		this.statusTag.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this.toggleSourceSwitch(this.statusTag);
+		});
+		this.statusCount = row1.createSpan({ cls: "lx-count", text: "" });
+		row1.createDiv({ cls: "lx-status-spacer" });
+		this.favBtn = row1.createEl("button", { cls: "lx-icon-btn lx-fav", attr: { "aria-label": "收藏到生词本" } });
+		this.favBtn.innerHTML = "☆";
+		this.speakBtn = row1.createEl("button", { cls: "lx-icon-btn lx-speak", attr: { "aria-label": "发音" } });
+		this.speakBtn.innerHTML = "🔊";
+		// 迷你搜索：尺寸/字号对齐词典胶囊，放行1最右
+		this.searchMini = row1.createEl("input", {
+			cls: "lx-input lx-search-mini",
+			attr: { placeholder: "搜索…", spellcheck: "false" },
+		});
+		const row2 = this.statusEl.createDiv({ cls: "lx-status-row lx-status-row2" });
+		const nav = row2.createDiv({ cls: "lx-nav" });
+		this.prevBtn = nav.createEl("button", { cls: "lx-icon-btn", attr: { "aria-label": "上一个" } });
+		this.prevBtn.innerHTML = "‹";
+		this.nextBtn = nav.createEl("button", { cls: "lx-icon-btn", attr: { "aria-label": "下一个" } });
+		this.nextBtn.innerHTML = "›";
+		// 状态文本（就绪/查询中/错误等），不破坏操作栏结构
+		this.statusText = this.statusEl.createDiv({ cls: "lx-status-text", text: "就绪" });
+	}
+
+	private bindEvents(): void {
+		const bindInput = (el: HTMLInputElement): void => {
+			el.addEventListener("keydown", (e) => {
+				if (e.key === "Enter") {
+					e.preventDefault();
+					const w = el.value.trim();
+					if (w) {
+						// 默认按顺序展示：每次新查词回到顺序中的第一个词典（AI 恒追加末尾）
+						const first = this.sources.find((x) => !x.isAI) ?? this.sources[0];
+						if (first && first.id !== this.activeSourceId) {
+							this.activeSourceId = first.id;
+							this.renderTabs();
+						}
+						void this.lookup(w);
+					}
+				} else if (e.key === "Escape") {
+					e.preventDefault();
+					this.hide();
+				}
+			});
+		};
+		bindInput(this.input);
+		bindInput(this.searchMini);
+		this.closeBtn.addEventListener("click", () => this.hide());
+		this.floatClose.addEventListener("click", () => this.hide());
+		this.prevWordLabel.addEventListener("click", () => this.navigate(-1));
+		this.prevBtn.addEventListener("click", () => this.navigate(-1));
+		this.nextBtn.addEventListener("click", () => this.navigate(1));
+		this.speakBtn.addEventListener("click", () => void this.speakCurrent());
+		this.favBtn.addEventListener("click", () => void this.favCurrent());
+		// 点击面板空白区域（tabs 空白、内容区空白、状态栏）自动收回
+		this.root.addEventListener("mousedown", (e) => {
+			const t = e.target as HTMLElement;
+			if (
+				t === this.root ||
+				t === this.tabsEl ||
+				t === this.contentWrap ||
+				t === this.statusEl
+			) {
+				this.hide();
+			}
+		});
+		// inner 滚动驱动右侧细进度条（移动端系统滚动条不可见时提示进度）
+		this.contentInner.addEventListener("scroll", () => this.onInnerScroll());
+		// 点击面板外部遮罩自动收回
+		this.backdrop.addEventListener("click", () => this.hide());
+	}
+
+	setSources(sources: LookupSource[]): void {
+		this.sources = sources;
+		if (!sources.length) {
+			this.activeSourceId = "";
+			this.tabsEl.empty();
+			return;
+		}
+		if (!sources.some((s) => s.id === this.activeSourceId)) {
+			this.activeSourceId = sources[0].id;
+		}
+		this.renderTabs();
+	}
+
+	private renderTabs(): void {
+		this.tabsEl.empty();
+		for (const s of this.sources) {
+			const tab = this.tabsEl.createEl("button", {
+				cls: "lx-tab" + (s.id === this.activeSourceId ? " active" : ""),
+				text: shortName(s.name),
+			});
+			tab.title = s.name;
+			tab.addEventListener("click", () => {
+				this.activeSourceId = s.id;
+				this.renderTabs();
+				const w = this.input.value.trim() || this.currentWord();
+				if (w) void this.lookup(w, false);
+			});
+		}
+	}
+
+	toggle(): void {
+		if (this.shown) this.hide();
+		else this.show();
+	}
+
+	show(): void {
+		this.shown = true;
+		document.body.addClass("lingua-nex-panel-open");
+		this.root.style.display = "";
+		this.backdrop.addClass("shown");
+		this.root.addClass("shown");
+		// 高度内容自适应：初始为紧凑自然高度（无内容不撑满），查词/查 AI 后由内容自然撑大，
+		// 上限由 CSS max-height 限定；AI 区不再依赖 flex-grow，天然避免折叠
+		this.input.focus();
+		this.input.select();
+	}
+
+	/**
+	 * 悬浮窗查词：完整复用抽屉面板（词典/AI/追问条全量），仅改为选区附近悬浮呈现。
+	 * 透明无暗色遮罩：不启用 lingua-nex-backdrop，正常悬浮；尺寸加宽加长保证内容可读。
+	 * 点外部、点空白或 ✕ 关闭；位置贴近选区，超出视口自动翻转，带圆角边框样式。
+	 */
+	async showAt(word: string, rect: DOMRect): Promise<void> {
+		this.shown = true;
+		document.body.addClass("lingua-nex-panel-open");
+		// 悬浮窗不显示暗色遮罩（透明背景正常悬浮），即使此前抽屉形态残留遮罩也一并清除
+		this.root.style.display = "";
+		this.backdrop.removeClass("shown");
+		this.root.addClass("shown");
+		this.root.addClass("lx-floating");
+		this.input.focus();
+		this.input.select();
+		const pad = 6;
+		// 悬浮窗尺寸：宽最多 70% 屏宽 / 420px，高最多 50% 屏高 / 480px，内容按缩放适配
+		const maxH = Math.min(window.innerHeight * 0.5, 480);
+		let top = rect.bottom + pad;
+		if (top + maxH > window.innerHeight - pad) {
+			top = Math.max(pad, rect.top - maxH - pad);
+		}
+		const w = Math.min(window.innerWidth * 0.7, 420);
+		let left = rect.left;
+		if (left + w > window.innerWidth - pad) {
+			left = Math.max(pad, window.innerWidth - w - pad);
+		}
+		this.root.style.top = `${top}px`;
+		this.root.style.left = `${left}px`;
+		this.root.style.width = `${w}px`;
+		this.root.style.maxHeight = `${maxH}px`;
+		this.floatClose.addClass("shown");
+		// 顶部栏实际高度写入 CSS 变量：内容区 margin-top 精确腾位，杜绝 tab 遮挡首行释义
+		this.syncTopHeight();
+		// 点击面板外任意处自动关闭（头部收起、内容区外都生效；iframe 内部点击不冒泡到外层）
+		document.addEventListener("mousedown", this.outsideClose, true);
+		await this.lookup(word, true, true);
+	}
+
+	/**
+	 * 命令入口悬浮查词：不依赖选区，悬浮卡片居中呈现，用户可直接手动输入要查的词。
+	 * 与选区悬浮 showAt 的唯一差别是无 rect 时取屏幕中部定位，其余形态、关闭逻辑完全一致。
+	 */
+	async showFloating(word?: string): Promise<void> {
+		this.shown = true;
+		document.body.addClass("lingua-nex-panel-open");
+		this.root.style.display = "";
+		this.backdrop.removeClass("shown");
+		this.root.addClass("shown");
+		this.root.addClass("lx-floating");
+		this.input.focus();
+		this.input.select();
+		const pad = 6;
+		const maxH = Math.min(window.innerHeight * 0.5, 480);
+		const w = Math.min(window.innerWidth * 0.7, 420);
+		const left = Math.max(pad, (window.innerWidth - w) / 2);
+		const top = Math.max(pad, (window.innerHeight - maxH) / 2 - 32);
+		this.root.style.top = `${top}px`;
+		this.root.style.left = `${left}px`;
+		this.root.style.width = `${w}px`;
+		this.root.style.maxHeight = `${maxH}px`;
+		this.floatClose.addClass("shown");
+		this.syncTopHeight();
+		document.addEventListener("mousedown", this.outsideClose, true);
+		if (word) await this.lookup(word, true, true);
+	}
+
+	/** 悬浮窗 header（名称/输入框/关闭钮）实际高度同步为 CSS 变量：内容区 margin-top 精确匹配，Tab 已并入内容区无需计入 */
+	private syncTopHeight(): void {
+		if (!this.topEl) return;
+		const h = Math.ceil(this.topEl.getBoundingClientRect().height);
+		if (h > 0) {
+			this.topHeight = h;
+			this.root.style.setProperty("--lx-top-h", `${h}px`);
+		}
+	}
+
+	/** 悬浮窗：点击面板以外区域自动关闭（捕获阶段，避免被面板内 stopPropagation 影响） */
+	private outsideClose = (e: MouseEvent): void => {
+		const t = e.target as Node;
+		if (!this.root.hasClass("lx-floating")) return;
+		if (t === this.iframe || (t instanceof Element && t.closest?.("iframe"))) return;
+		if (!this.root.contains(t)) this.hide();
+	};
+
+	/**
+	 * 悬浮窗交互：顶部栏空白区拖动换位 + 四边四角无级缩放。
+	 * 仅 lx-floating 形态生效；拖动/缩放均挂在 window 上跟踪指针，避免 setPointerCapture
+	 * 目标歧义，松手/取消即解绑。输入框、按钮、下拉等可交互元素自动跳过拖动。
+	 */
+	private setupFloatInteractions(): void {
+		const MIN_W = 220;
+		const MIN_H = 160;
+		const onPointerDown = (e: PointerEvent, kind: "drag" | "resize", dir = ""): void => {
+			if (!this.root.hasClass("lx-floating")) return;
+			if (e.pointerType === "mouse" && e.button !== 0) return;
+			const t = e.target as HTMLElement;
+			if (kind === "drag" && t.closest("input,button,select,textarea")) return;
+			e.preventDefault();
+			if (kind === "drag") {
+				this.root.addClass("lx-dragging");
+				this.dragState = {
+					pid: e.pointerId,
+					sx: e.clientX,
+					sy: e.clientY,
+					ox: this.root.offsetLeft,
+					oy: this.root.offsetTop,
+				};
+			} else {
+				this.resizeState = {
+					pid: e.pointerId,
+					dir,
+					sx: e.clientX,
+					sy: e.clientY,
+					r: this.root.getBoundingClientRect(),
+				};
+			}
+		};
+		const onPointerMove = (e: PointerEvent): void => {
+			const d = this.dragState;
+			if (d && e.pointerId === d.pid) {
+				const dx = e.clientX - d.sx;
+				const dy = e.clientY - d.sy;
+				const w = this.root.offsetWidth;
+				const h = this.root.offsetHeight;
+				const left = Math.min(Math.max(d.ox + dx, -w + 60), window.innerWidth - 60);
+				const top = Math.min(Math.max(d.oy + dy, 0), window.innerHeight - 40);
+				this.root.style.left = `${left}px`;
+				this.root.style.top = `${top}px`;
+				return;
+			}
+			const rs = this.resizeState;
+			if (!rs || e.pointerId !== rs.pid) return;
+			e.preventDefault();
+			const dx = e.clientX - rs.sx;
+			const dy = e.clientY - rs.sy;
+			const r = rs.r;
+			let left = r.left;
+			let top = r.top;
+			let width = r.width;
+			let height = r.height;
+			if (rs.dir.includes("e")) width = Math.max(MIN_W, r.width + dx);
+			if (rs.dir.includes("s")) height = Math.max(MIN_H, r.height + dy);
+			if (rs.dir.includes("w")) {
+				width = Math.max(MIN_W, r.width - dx);
+				left = r.right - width;
+			}
+			if (rs.dir.includes("n")) {
+				height = Math.max(MIN_H, r.height - dy);
+				top = r.bottom - height;
+			}
+			width = Math.min(width, window.innerWidth - 6);
+			height = Math.min(height, window.innerHeight - 6);
+			left = Math.max(0, Math.min(left, window.innerWidth - 60));
+			top = Math.max(0, Math.min(top, window.innerHeight - 40));
+			this.root.style.width = `${width}px`;
+			this.root.style.height = `${height}px`;
+			this.root.style.maxHeight = `${height}px`;
+			this.root.style.left = `${left}px`;
+			this.root.style.top = `${top}px`;
+			this.syncTopHeight();
+			this.updateScrollbar();
+		};
+		const onPointerEnd = (e: PointerEvent): void => {
+			if (this.dragState && e.pointerId === this.dragState.pid) {
+				this.dragState = null;
+				this.root.removeClass("lx-dragging");
+			}
+			if (this.resizeState && e.pointerId === this.resizeState.pid) {
+				this.resizeState = null;
+			}
+		};
+		window.addEventListener("pointermove", onPointerMove);
+		window.addEventListener("pointerup", onPointerEnd);
+		window.addEventListener("pointercancel", onPointerEnd);
+		// 拖动把手为插件名+输入框行：收起后该行保留并收窄，仍可拖动换位
+		this.headerEl.addEventListener("pointerdown", (e) => onPointerDown(e, "drag"));
+		const dirs = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+		for (const dir of dirs) {
+			const h = this.root.createDiv({ cls: `lx-resize-handle ${dir}` });
+			h.addEventListener("pointerdown", (e) => onPointerDown(e, "resize", dir));
+			this.resizeHandles.push(h);
+		}
+	}
+
+	/**
+	 * 查询结果若命中：查词返回后自动渲染。隐藏时恢复默认尺寸（hide 已清空内联尺寸）。
+	 */
+	hide(): void {
+		this.shown = false;
+		this.currentOnline = null;
+		document.body.removeClass("lingua-nex-panel-open");
+		this.backdrop.removeClass("shown");
+		this.root.removeClass("shown");
+		// 恢复内联 display:none 兜底，与构造时一致：即使样式表异常面板也绝不可见
+		this.root.style.display = "none";
+		// 清除悬浮形态，回到贴顶抽屉默认样式
+		this.root.removeClass("lx-floating");
+		this.floatClose.removeClass("shown");
+		document.removeEventListener("mousedown", this.outsideClose, true);
+		this.root.style.top = "";
+		this.root.style.left = "";
+		this.root.style.width = "";
+		this.root.style.maxHeight = "";
+		this.root.style.height = "";
+		this.root.removeClass("lx-dragging");
+		this.dragState = null;
+		this.resizeState = null;
+		this.aiAbort?.abort();
+		this.aiCache.clear();
+		if (this.sourceSwitchEl) {
+			this.sourceSwitchEl.remove();
+			this.sourceSwitchEl = null;
+		}
+	}
+
+	get visible(): boolean {
+		return this.shown;
+	}
+
+	/** 当前是否为悬浮窗形态（区别于贴顶抽屉） */
+	get floating(): boolean {
+		return this.root.hasClass("lx-floating");
+	}
+
+	/** 面板根节点（供选区监听判断选区是否位于面板内，避免面板内选中触发自动查词） */
+	get rootEl(): HTMLElement {
+		return this.root;
+	}
+
+	private currentWord(): string {
+		const item = this.history[this.histIdx];
+		return item ? item.word : "";
+	}
+
+	/** 直接用 AI 解释：打开面板并切换到 AI 源查询（未开启/未配置时提示） */
+	async lookupAI(word: string): Promise<void> {
+		const w = word.trim();
+		if (!w) return;
+		this.show();
+		const ai = this.sources.find((s) => s.isAI);
+		if (!ai) {
+			this.show();
+			this.syncInputs(w);
+			this.setStatus("AI 未开启：请在设置中开启 AI 并配置 API");
+			return;
+		}
+		this.activeSourceId = ai.id;
+		this.renderTabs();
+		await this.lookup(w);
+	}
+
+	/** 带自定义提示词打开 AI 查询（PDF 右键 AI 翻译/详解等入口）：打开面板并切到 AI 源 */
+	async lookupAIPrompt(word: string, promptText: string): Promise<void> {
+		const w = word.trim();
+		if (!w) return;
+		this.show();
+		const ai = this.sources.find((s) => s.isAI);
+		if (!ai) {
+			this.show();
+			this.syncInputs(w);
+			this.setStatus("AI 未开启：请在设置中开启 AI 并配置 API");
+			return;
+		}
+		this.activeSourceId = ai.id;
+		this.renderTabs();
+		await this.aiQuery(ai, w, true, promptText);
+	}
+
+	/**
+	 * 查词：只在当前激活的 Tab（词典/AI）上查询，保证切换后内容与词典严格对应、绝不混淆。
+	 * preferDict=true 时（选中查词入口）强制回到首个词典源，避免默认消耗 AI Token；词典未命中时仍自动兜底 AI。
+	 * 词典未命中时若已启用 AI 则自动兜底解释，保证“查词必有结果”。
+	 */
+	async lookup(word: string, pushHistory = true, preferDict = false): Promise<void> {
+		const w = word.trim();
+		if (!w) return;
+		if (preferDict) {
+			const dictSrc = this.sources.find((x) => !x.isAI);
+			if (dictSrc) {
+				this.activeSourceId = dictSrc.id;
+				this.renderTabs();
+			}
+		}
+		this.syncInputs(w);
+		// 新查询开始即清掉旧未命中占位，避免切源后残留上一源的提示
+		this.missEl?.addClass("hidden");
+		this.setStatus(`查询中：${w}…`);
+		this.aiAbort?.abort();
+		this.aiAbort = null;
+
+		const s = this.sources.find((x) => x.id === this.activeSourceId);
+		if (!s) {
+			this.setStatus("暂无可用解释源，请在设置中添加词典或开启 AI");
+			return;
+		}
+		if (s.isAI) {
+			await this.aiQuery(s, w, pushHistory);
+			return;
+		}
+		if (s.isOnline) {
+			await this.onlineQuery(s, w, pushHistory);
+			return;
+		}
+		const mdict = s.mdict;
+		if (!mdict || !mdict.isLoaded) {
+			this.setStatus("该词典尚未加载，请稍候或重新扫描");
+			return;
+		}
+		const res = mdict.lookup(w);
+		if (res && res.definition != null) {
+			this.currentDoc = res.definition;
+			this.setStatusTag(s.name, mdict.info.wordCount);
+			const doc = this.buildDoc(res.definition, mdict, s.resources);
+			this.renderIframe(doc);
+			this.iframe.classList.remove("hidden");
+			this.commitHistory(w, s.id, "", pushHistory);
+			void this.refreshFavState(w);
+			if (this.plugin.settings.vocab.autoAddOnLookup) {
+				void this.plugin.addToDefaultBook(w, res.definition, true);
+			}
+			return;
+		}
+		// 词典未命中：中间区域切换为未命中占位（不残留上一源内容），底部同步提示
+		this.setStatus(`未命中：${w}（当前词典 ${shortName(s.name, 16)}，可点 AI 释义）`);
+		this.showMiss(w, shortName(s.name, 16));
+		void this.refreshFavState(w);
+	}
+
+	/** 在线词典查询（有道 / Free Dictionary 等多源）：命中渲染释义与发音，未命中仅提示 */
+	private async onlineQuery(
+		s: LookupSource,
+		w: string,
+		pushHistory: boolean,
+	): Promise<void> {
+		this.currentOnline = null;
+		const result = await this.plugin.queryOnline(s.id, w);
+		if (result) {
+			this.currentOnline = {
+				word: w,
+				phoneticBr: null,
+				phoneticUs: null,
+				audioBr: result.audioBr,
+				audioUs: result.audioUs,
+				groups: [],
+				raw: null,
+			};
+			this.currentDoc = "";
+			this.setStatusTag(s.name, 0);
+			this.renderIframe(result.doc);
+			this.commitHistory(w, s.id, "", pushHistory);
+			void this.refreshFavState(w);
+			return;
+		}
+		this.setStatus(`未命中：当前${shortName(s.name, 16)}词典未命中`);
+		this.showMiss(w, shortName(s.name, 16));
+		void this.refreshFavState(w);
+	}
+
+	/**
+	 * 未命中占位：切源后若该源未命中，中间内容区同样切换显示提示（隐藏词典 iframe 与 AI 区），
+	 * 让用户直观看到当前源确实没查到，而非残留上一源的旧内容。
+	 */
+	private showMiss(w: string, srcName: string): void {
+		this.iframe.classList.add("hidden");
+		this.hideAiHolder();
+		if (!this.missEl) {
+			this.missEl = this.contentInner.createDiv({ cls: "lx-miss" });
+		}
+		this.missEl.removeClass("hidden");
+		this.missEl.setText(`当前${srcName}词典未命中`);
+		this.contentInner.scrollTop = 0;
+		this.updateScrollbar();
+	}
+
+	/** AI 释义查询（流式增量渲染；也可作为词典未命中兜底） */
+	private async aiQuery(
+		s: LookupSource,
+		w: string,
+		pushHistory: boolean,
+		promptText = "",
+	): Promise<void> {
+		const cfg = this.plugin.settings.ai as AIConfig;
+		if (!cfg.apiKey) {
+			this.setStatus("AI 未配置：请在设置中填写 API Key 与地址");
+			return;
+		}
+		// 缓存命中：面板未关闭、同一单词与同一提示词，直接复用旧结果，不重复请求
+		const cacheKey = `${s.id}|${w}|${promptText}`;
+		const cached = this.aiCache.get(cacheKey);
+		if (cached !== undefined) {
+			this.renderAiResult(s, w, cached, pushHistory);
+			this.setStatus("");
+			void this.refreshFavState(w);
+			return;
+		}
+		this.setStatus("AI 释义中…");
+		this.aiAbort?.abort();
+		this.aiAbort = new AbortController();
+		const signal = this.aiAbort.signal;
+		// 词典 Tab 时保留 iframe 共存，AI 区显示在下部；AI Tab 时独占
+		const aiOnly = s.isAI && this.activeSourceId === s.id;
+		if (aiOnly) this.iframe.classList.add("hidden");
+		const holder = this.showAiHolder();
+		this.aiScroll?.empty();
+		this.aiContext = [{ role: "user", content: w }];
+		this.mdComp?.unload();
+		this.mdComp = new Component();
+		const renderEl = this.aiScroll!.createDiv({ cls: "lx-ai-md" });
+		renderEl.createSpan({ cls: "lx-ai-streaming", text: "正在生成…" });
+		let md = "";
+		let timer: number | null = null;
+		const paint = async () => {
+			renderEl.empty();
+			await MarkdownRenderer.render(
+				this.plugin.app,
+				md || "…",
+				renderEl,
+				"",
+				this.mdComp as Component,
+			);
+		};
+		try {
+			const stream = await aiLookupStream(cfg, w, signal, promptText);
+			for await (const chunk of stream) {
+				md += chunk;
+				if (timer == null) {
+					timer = window.setTimeout(() => {
+						timer = null;
+						void paint();
+					}, 90);
+				}
+			}
+			if (timer != null) {
+				window.clearTimeout(timer);
+				timer = null;
+			}
+			await paint();
+			this.aiCache.set(cacheKey, md);
+			this.renderAiResult(s, w, md, pushHistory);
+			this.setStatus("");
+			void this.refreshFavState(w);
+		} catch (e: any) {
+			if (e?.name === "AbortError") return;
+			this.setStatus(`AI 失败：${e?.message ?? "未知错误"}`);
+			if (!md) {
+				renderEl.empty();
+				renderEl.createDiv({
+					cls: "lx-ai-error",
+					text: `AI 失败：${e?.message ?? "未知错误"}`,
+				});
+			}
+		}
+	}
+
+	/** 渲染 AI 结果到 AI 区（流式完成与缓存复用共用），并同步多轮上下文与历史 */
+	private renderAiResult(
+		s: LookupSource,
+		w: string,
+		md: string,
+		pushHistory: boolean,
+	): void {
+		// 词典 Tab 时保留 iframe 共存，AI 区显示在下部；AI Tab 时独占
+		const aiOnly = s.isAI && this.activeSourceId === s.id;
+		if (aiOnly) this.iframe.classList.add("hidden");
+		this.showAiHolder();
+		this.aiScroll?.empty();
+		this.aiContext = [
+			{ role: "user", content: w },
+			{ role: "assistant", content: md },
+		];
+		this.mdComp?.unload();
+		this.mdComp = new Component();
+		const renderEl = this.aiScroll!.createDiv({ cls: "lx-ai-md" });
+		void MarkdownRenderer.render(
+			this.plugin.app,
+			md || "…",
+			renderEl,
+			"",
+			this.mdComp as Component,
+		).then(() => this.scrollToAi());
+		this.currentDoc = md;
+		this.commitHistory(w, s.id, md, pushHistory);
+	}
+
+	private commitHistory(word: string, sourceId: string, aiHtml: string, push: boolean): void {
+		if (!push) {
+			if (this.histIdx >= 0) this.history[this.histIdx] = { word, sourceId, aiHtml };
+		} else {
+			this.history = this.history.slice(0, this.histIdx + 1);
+			this.history.push({ word, sourceId, aiHtml });
+			if (this.history.length > MAX_HISTORY) this.history.shift();
+			this.histIdx = this.history.length - 1;
+		}
+		this.updatePrevWord();
+	}
+
+	private navigate(delta: number): void {
+		const next = this.histIdx + delta;
+		if (next < 0 || next >= this.history.length) return;
+		this.histIdx = next;
+		const item = this.history[next];
+		this.syncInputs(item.word);
+		if (item.aiHtml) {
+			this.iframe.classList.add("hidden");
+			const holder = this.showAiHolder();
+			this.aiScroll?.empty();
+			this.aiContext = [];
+			this.mdComp?.unload();
+			this.mdComp = new Component();
+			const renderEl = this.aiScroll!.createDiv({ cls: "lx-ai-md" });
+			void MarkdownRenderer.render(
+				this.plugin.app,
+				item.aiHtml,
+				renderEl,
+				"",
+				this.mdComp as Component,
+			);
+			this.setStatus("");
+		} else {
+			this.hideAiHolder();
+			this.iframe.classList.remove("hidden");
+			const s = this.sources.find((x) => x.id === item.sourceId);
+			if (s?.mdict) {
+				const res = s.mdict.lookup(item.word);
+				if (res?.definition != null) {
+					const doc = this.buildDoc(res.definition, s.mdict, s.resources);
+					this.renderIframe(doc);
+					this.setStatus("");
+				}
+			}
+		}
+		this.updatePrevWord();
+	}
+
+	private updatePrevWord(): void {
+		// 顶部显示“上一个查的词”：可点击切回；无上一个词时隐藏
+		const prev = this.histIdx > 0 ? this.history[this.histIdx - 1].word : "";
+		this.prevWordLabel.textContent = prev;
+		this.prevWordLabel.classList.toggle("hidden", !prev);
+	}
+
+	/** 同步顶部大输入框与底部迷你搜索框的值（任一处查词/切词都保持一致） */
+	private syncInputs(w: string): void {
+		this.input.value = w;
+		this.searchMini.value = w;
+	}
+
+	private renderIframe(doc: string): void {
+		this.missEl?.addClass("hidden");
+		this.iframe.classList.remove("hidden");
+		// 悬浮窗形态：词典内容整体缩小 12%，避免大字号排版在加宽面板内仍被遮挡
+		if (this.root.hasClass("lx-floating")) {
+			doc += '<style data-lx-zoom="1">body{zoom:0.88}</style>';
+		}
+		this.iframe.srcdoc = doc;
+		// 新词条从顶部看起（词典在上，AI 区在下方）
+		this.contentInner.scrollTop = 0;
+		this.updateScrollbar();
+		// 词典内容高度自适应：iframe 撑到内容实际高度，全文统一由 inner 滚动查看
+		this.iframe.onload = () => {
+			try {
+				const docEl = this.iframe.contentDocument?.scrollingElement;
+				if (!docEl) return;
+				const h = Math.ceil(docEl.scrollHeight) || 0;
+				this.iframe.style.height = h > 0 ? `${h}px` : "auto";
+				this.updateScrollbar();
+				// 词典内容渲染后顶部栏高度可能有变化（Tab 增删/激活态），同步刷新腾位高度
+				this.syncTopHeight();
+			} catch (e) {
+				/* 跨域/异常时忽略 */
+			}
+		};
+	}
+
+	/** 右侧细进度条：inner 整体滚动进度（词典全文 + AI 回答统一滚动） */
+	private updateScrollbar(): void {
+		const el = this.contentInner;
+		if (!el) return;
+		const sh = el.scrollHeight;
+		const ch = el.clientHeight;
+		if (sh <= ch) {
+			this.scrollbarThumb.style.height = "0%";
+			this.scrollbarThumb.style.top = "0%";
+			return;
+		}
+		const ratio = ch / sh;
+		const pos = sh - ch > 0 ? el.scrollTop / (sh - ch) : 0;
+		this.scrollbarThumb.style.height = `${Math.max(6, ratio * 100).toFixed(2)}%`;
+		this.scrollbarThumb.style.top = `${(pos * (1 - ratio) * 100).toFixed(2)}%`;
+	}
+
+	/** 显示 AI 区：内容自适应高度（AI 回答多高就多高），词典+AI 共存时整体由 inner 统一滚动 */
+	private showAiHolder(): HTMLElement {
+		this.missEl?.addClass("hidden");
+		this.aiHolder?.removeClass("lx-ai-hidden");
+		this.divider?.removeClass("hidden");
+		this.updateScrollbar();
+		return this.aiHolder as HTMLElement;
+	}
+
+	private hideAiHolder(): void {
+		this.aiHolder?.addClass("lx-ai-hidden");
+		this.divider?.addClass("hidden");
+		if (this.aiHolder) {
+			this.aiHolder.style.flex = "";
+			this.aiHolder.style.height = "";
+		}
+		this.updateScrollbar();
+	}
+
+	/** AI 区底部独立的追问输入行（不遮挡释义内容） */
+	private buildAskBar(): void {
+		if (!this.contentWrap) return;
+		// 追问条是第三个独立板块：挂在 contentWrap 底部，与词典区、AI 区平级；
+		// 绝不挂进 AI 区内（避免挤压 AI 回答高度、也避免 AI 区隐藏时追问条一起消失）
+		// 追问条是第三个独立板块：挂在面板 root 底部（contentWrap 之外），不参与词典/AI 滚动，固定可见
+		const bar = this.root.createDiv({ cls: "lx-ai-ask" });
+		const inp = bar.createEl("input", {
+			cls: "lx-ai-ask-input",
+			attr: { placeholder: "追问 AI…", spellcheck: "false" },
+		});
+		const btn = bar.createEl("button", { cls: "lx-ai-ask-btn", text: "追问" });
+		const send = () => void this.askFollowUp();
+		btn.addEventListener("click", send);
+		inp.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				send();
+			}
+		});
+		this.aiAskInput = inp;
+	}
+
+	/** 基于当前词条对话上下文继续追问 AI（多轮流式） */
+	private async askFollowUp(): Promise<void> {
+		const q = this.aiAskInput?.value.trim();
+		if (!q) return;
+		const cfg = this.plugin.settings.ai as AIConfig;
+		if (!cfg.apiKey) {
+			this.setStatus("AI 未配置：请在设置中填写 API Key 与地址");
+			return;
+		}
+		this.aiAskInput!.value = "";
+		this.aiContext.push({ role: "user", content: q });
+		this.setStatus("AI 回答中…");
+		this.aiAbort?.abort();
+		this.aiAbort = new AbortController();
+		const signal = this.aiAbort.signal;
+		this.showAiHolder();
+		// 自动滚到 AI 区：分隔线停在 50% 极限处，词典上半屏仍可见
+		this.contentInner.scrollTop = this.contentInner.scrollHeight;
+		this.mdComp?.unload();
+		this.mdComp = new Component();
+		const renderEl = this.aiScroll!.createDiv({ cls: "lx-ai-md lx-ai-follow" });
+		renderEl.createSpan({ cls: "lx-ai-streaming", text: "正在生成…" });
+		let md = "";
+		let timer: number | null = null;
+		const paint = async () => {
+			renderEl.empty();
+			await MarkdownRenderer.render(
+				this.plugin.app,
+				md || "…",
+				renderEl,
+				"",
+				this.mdComp as Component,
+			);
+		};
+		try {
+			const stream = await aiLookupStream(cfg, q, signal, "", this.aiContext);
+			for await (const chunk of stream) {
+				md += chunk;
+				if (timer == null) {
+					timer = window.setTimeout(() => {
+						timer = null;
+						void paint();
+					}, 90);
+				}
+			}
+			if (timer != null) {
+				window.clearTimeout(timer);
+				timer = null;
+			}
+			await paint();
+			this.aiContext.push({ role: "assistant", content: md });
+			this.setStatus("");
+		} catch (e: any) {
+			if (e?.name === "AbortError") return;
+			this.setStatus(`AI 失败：${e?.message ?? "未知错误"}`);
+			if (!md) {
+				renderEl.empty();
+				renderEl.createDiv({
+					cls: "lx-ai-error",
+					text: `AI 失败：${e?.message ?? "未知错误"}`,
+				});
+			}
+		}
+	}
+
+	/**
+	 * inner 滚动联动：更新右侧进度条；悬浮窗形态下把滚动位置连续映射为顶部栏收起进度（无级），
+	 * 不再有"超过阈值才收起"的跳变，因此临界态不会闪动。
+	 * 收起全程 = Tab 行高度 + 头部可压缩量；若内容可滚动距离小于收起全程（内容短），
+	 * 按比例缩放——滚到底即完全收起，滚回顶部即完全展开，任何长度都稳定无闪。
+	 */
+	/** Tab 已在内容滚动区内随内容上走，无需任何收起联动；滚动只负责更新滚动条 */
+	private onInnerScroll(): void {
+		this.updateScrollbar();
+	}
+
+	/** 顶部栏（header）完整高度缓存（--lx-top-h 同步来源） */
+	private topHeight = 0;
+
+	/** AI 渲染完成后，若 AI 区完全在可视区下方（词典过长时），自动滚到 AI 区顶部；可见则不打断阅读 */
+	private scrollToAi(): void {
+		const holder = this.aiHolder;
+		const el = this.contentInner;
+		if (!holder || !el) return;
+		const top = holder.offsetTop;
+		if (top > el.scrollTop + el.clientHeight - 24) {
+			el.scrollTop = Math.max(0, top - 12);
+			this.updateScrollbar();
+		}
+	}
+
+	private setStatus(text: string): void {
+		this.statusText.textContent = text;
+		this.statusText.classList.toggle("hidden", !text);
+	}
+
+	/** 命中状态：小字胶囊 tag（词典名）+ 词条数，不喧宾夺主；点胶囊弹出源切换列表 */
+	private setStatusTag(name: string, wordCount: number): void {
+		this.statusEl.addClass("lx-has-switch");
+		this.statusTag.textContent = shortName(name, 16);
+		this.statusTag.title = name;
+		this.statusCount.textContent =
+			wordCount > 0
+				? `· ${wordCount.toLocaleString()} 词条`
+				: "· 在线";
+		this.statusText.addClass("hidden");
+		this.statusEl.classList.remove("hidden");
+	}
+
+	/** 在状态胶囊下方展开所有解释源，点击即切换（顶部 Tab 的补充入口） */
+	private toggleSourceSwitch(anchor: HTMLElement): void {
+		if (this.sourceSwitchEl) {
+			this.sourceSwitchEl.remove();
+			this.sourceSwitchEl = null;
+			return;
+		}
+		const wrap = this.statusEl.createDiv({ cls: "lx-source-switch" });
+		for (const s of this.sources) {
+			const item = wrap.createEl("button", {
+				cls:
+					"lx-source-item" + (s.id === this.activeSourceId ? " active" : ""),
+				text: shortName(s.name, 24),
+			});
+			item.title = s.name;
+			item.addEventListener("click", () => {
+				wrap.remove();
+				this.sourceSwitchEl = null;
+				if (s.id === this.activeSourceId) return;
+				this.activeSourceId = s.id;
+				this.renderTabs();
+				const w = this.input.value.trim() || this.currentWord();
+				if (w) void this.lookup(w, false);
+			});
+		}
+		this.sourceSwitchEl = wrap;
+		window.setTimeout(() => {
+			document.addEventListener("mousedown", this.closeSourceSwitch, {
+				once: true,
+			});
+		}, 0);
+	}
+
+	private closeSourceSwitch = (e: MouseEvent): void => {
+		const t = e.target as HTMLElement;
+		if (this.sourceSwitchEl && !this.sourceSwitchEl.contains(t)) {
+			this.sourceSwitchEl.remove();
+			this.sourceSwitchEl = null;
+		}
+	};
+
+	/**
+	 * 词条 HTML 资源改写，统一链路：磁盘配套资源(DictResources) → MDD 内资源 → 原样保留。
+	 * 覆盖 link/script/img 的 src/href（含 file://、bres:、相对路径）与 sound:/bres: 内嵌引用。
+	 */
+	buildDoc(html: string, mdict: LinguaNexMdict, resources?: DictResources): string {
+		const resolve = (raw: string): string | null => {
+			const clean = raw
+				.replace(/^file:\/\/\//i, "")
+				.replace(/^bres:\/?/i, "")
+				.replace(/^sound:\/?/i, "")
+				.replace(/^\\+/, "")
+				.replace(/^\/+/, "");
+			const name = clean.split(/[\\/]/).pop() ?? clean;
+			if (!name) return null;
+			// 1) 磁盘配套资源（同目录 css/js/ini）
+			const disk = resources?.urlFor(name);
+			if (disk) return disk;
+			// 2) MDD 内资源：依次尝试原 key、去前缀 key、basename、小写 basename
+			const tries = [clean, name, name.toLowerCase()];
+			for (const key of tries) {
+				const url = mdict.resourceAsBlobUrl(key, mimeByExt(key));
+				if (url) return url;
+			}
+			return null;
+		};
+
+		// CSS 内联：优先把样式文本内联为 <style>（欧路等词典 CSS 常带相对 url() 资源，
+		// 仅替换 <link> 会因 blob 加载时序导致渲染不全）；拿不到文本再回退 blob link。
+		const inlineCss = (raw: string): string | null => {
+			const clean = raw
+				.replace(/^file:\/\/\//i, "")
+				.replace(/^bres:\/?/i, "")
+				.replace(/^\/+/, "");
+			const name = clean.split(/[\\/]/).pop() ?? clean;
+			if (!name) return null;
+			let css: string | null = resources?.contentFor(name) ?? null;
+			if (css == null) {
+				const data = mdict.resource(name);
+				if (data) {
+					try {
+						css = new TextDecoder().decode(data);
+					} catch (e) {
+						css = null;
+					}
+				}
+			}
+			if (css == null) return null;
+			css = css.replace(
+				/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
+				(u, q: string, r: string) => {
+					if (/^(data:|https?:|blob:|#)/i.test(r)) return u;
+					const url = resolve(r);
+					return url ? `url(${url})` : u;
+				},
+			);
+			return css;
+		};
+
+		let out = html;
+		// link 整标签处理：能内联则内联，能解析则换 blob，都失败则整体删除（绝不残留原样标签文本）
+		out = out.replace(/<link\b[^>]*>/gi, (tag) => {
+			const hrefMatch = tag.match(/href\s*=\s*["']([^"']+)["']/i);
+			if (!hrefMatch) return "";
+			const href = hrefMatch[1] as string;
+			if (/^(data:|https?:|blob:)/i.test(href)) return tag;
+			const css = inlineCss(href);
+			if (css != null) return `<style data-lx-inline="1">${css}</style>`;
+			const url = resolve(href);
+			return url ? `<link rel="stylesheet" href="${url}" type="text/css" />` : "";
+		});
+		// 兜底：清除解析后仍可能残留的残缺 link 标签文本（防某些词典 HTML 的畸形写法）
+		out = out.replace(/<\s*\/?\s*link\b[^>]*>?/gi, "");
+		out = out.replace(/(<script[^>]*src=["'])([^"']+)(["'])/gi, (m, pre, src: string, post) => {
+			if (/^(data:|https?:|blob:)/i.test(src)) return m;
+			const url = resolve(src);
+			return url ? pre + url + post : m;
+		});
+		out = out.replace(/(<img[^>]*src=["'])([^"']+)(["'])/gi, (m, pre, src: string, post) => {
+			if (/^(data:|https?:|blob:)/i.test(src)) return m;
+			const url = resolve(src);
+			return url ? pre + url + post : m;
+		});
+		// 释义内发音链接：<a href="sound://xxx.mp3">🔊</a> → 可点击播放的发音按钮
+		out = out.replace(
+			/<a\b[^>]*href\s*=\s*["']sound:\/\/[^"']+["'][^>]*>(.*?)<\/a>/gi,
+			(m, inner: string) => {
+				const hrefMatch = m.match(
+					/href\s*=\s*["'](sound:\/\/[^"']+)["']/i,
+				);
+				const key = hrefMatch?.[1].replace(/^sound:\/+/, "") ?? "";
+				const url = key
+					? mdict.resourceAsBlobUrl(key, "audio/mpeg")
+					: null;
+				if (!url) return m;
+				const label = inner.replace(/<[^>]+>/g, "").trim() || "🔊";
+				return `<span class="lx-sound-btn" data-src="${url}" title="点击发音">${label}</span>`;
+			},
+		);
+		// 裸 sound:// 资源（src/href 之外）：直接内嵌迷你播放器
+		out = out.replace(/sound:\/\/[^\s"'<>]+/gi, (m) => {
+			const url = mdict.resourceAsBlobUrl(
+				m.replace(/^sound:\/+/, ""),
+				"audio/mpeg",
+			);
+			return url
+				? `<audio controls preload="none" src="${url}" style="height:26px;min-width:110px;vertical-align:middle"></audio>`
+				: m;
+		});
+		out = out.replace(/bres:([^\s"'<>]+)/gi, (m, key: string) => {
+			const url = resolve(key);
+			return url ?? m;
+		});
+		// 发音按钮点击播放脚本（srcdoc 内可执行）
+		if (out.includes("lx-sound-btn")) {
+			out +=
+				`<script>document.addEventListener('click',function(e){var t=e.target.closest('.lx-sound-btn');if(t){e.preventDefault();new Audio(t.getAttribute('data-src')).play().catch(function(){})}});<\/script>`;
+		}
+		return out;
+	}
+
+	async speakCurrent(): Promise<void> {
+		const w = this.input.value.trim() || this.currentWord();
+		if (!w) return;
+		const audio = this.plugin.settings.audio;
+		// 1) 当前在线词条（有道）：按发音变体直接播 dictvoice
+		if (audio.youdaoEnabled && this.currentOnline) {
+			const url =
+				audio.youdaoVariant === 2
+					? this.currentOnline.audioUs || this.currentOnline.audioBr
+					: this.currentOnline.audioBr || this.currentOnline.audioUs;
+			if (url && (await playAudioUrl(url))) return;
+		}
+		// 2) 当前词典 mdd 内置音频
+		if (audio.localEnabled) {
+			const soundPath = extractSoundPath(this.currentDoc);
+			if (soundPath) {
+				const s = this.sources.find(
+					(x) => !x.isAI && !x.isOnline && x.mdict,
+				);
+				if (s?.mdict && (await playMddAudio(s.mdict, soundPath))) return;
+			}
+		}
+		// 3) 有道在线兜底：本地词典无声（大 mdd 被跳过等）时仍能发音
+		if (audio.youdaoEnabled && this.plugin.settings.online?.youdao?.enabled) {
+			const entry = await this.plugin.youdao.query(w);
+			if (entry) {
+				const url =
+					audio.youdaoVariant === 2
+						? entry.audioUs || entry.audioBr
+						: entry.audioBr || entry.audioUs;
+				if (url && (await playAudioUrl(url))) return;
+			}
+		}
+		// 4) Free Dictionary 轻量源兜底
+		if (audio.freeEnabled && this.plugin.settings.online?.freeDict?.enabled) {
+			const entry = await this.plugin.freeDict.query(w);
+			if (entry) {
+				const url =
+					audio.freeVariant === "us"
+						? entry.audioUs || entry.audioBr
+						: entry.audioBr || entry.audioUs;
+				if (url && (await playAudioUrl(url))) return;
+			}
+		}
+		if (this.plugin.settings.tts.enabled) speakTTS(w, this.plugin.settings.tts.rate);
+	}
+
+	/** 按当前词刷新收藏星标激活态：已收藏显示黄色 ★，未收藏显示 ☆ */
+	async refreshFavState(word?: string): Promise<void> {
+		const w = ((word ?? this.input.value.trim()) || this.currentWord()).trim();
+		const fav = w ? await this.plugin.isFavorited(w) : false;
+		this.favBtn.innerHTML = fav ? "★" : "☆";
+		this.favBtn.toggleClass("active", fav);
+	}
+
+	async favCurrent(): Promise<void> {
+		const w = this.input.value.trim() || this.currentWord();
+		if (!w) return;
+		const faved = await this.plugin.isFavorited(w);
+		if (faved) {
+			await this.plugin.removeFromDefaultBook(w);
+			this.setStatus(`已取消收藏：${w}`);
+		} else {
+			await this.plugin.addToDefaultBook(w, this.currentDoc);
+			this.setStatus(`已收藏：${w}`);
+		}
+		await this.refreshFavState(w);
+	}
+
+	dispose(): void {
+		this.mdComp?.unload();
+		this.mdComp = null;
+		this.root.detach();
+	}
+}
