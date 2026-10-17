@@ -1,4 +1,4 @@
-import { Platform, Vault } from "obsidian";
+import { Vault } from "obsidian";
 
 const MDX_MAGIC = [0x00, 0x00, 0x03, 0x7c];
 const MDD_MAGIC = [0x00, 0x00, 0x03, 0x84];
@@ -47,43 +47,22 @@ async function inspectMdx(
 	path: string
 ): Promise<Pick<ScanResult, "valid" | "error" | "magicOk">> {
 	try {
-		if (Platform.isMobile) {
-			// 移动端 adapter 不支持 range read，加载时再做完整校验
-			const stat = await vault.adapter.stat(path);
-			if (!stat) return { valid: false, error: "文件不存在", magicOk: false };
-			return { valid: true, magicOk: null };
-		}
-		const fs = require("fs");
-		const fd = fs.openSync(path, "r");
-		const buf = Buffer.alloc(8);
-		try {
-			const n = fs.readSync(fd, buf, 0, 8, 0);
-			if (n < 8) return { valid: false, error: "文件过短", magicOk: false };
-			const ok =
-				buf[0] === MDX_MAGIC[0] && buf[1] === MDX_MAGIC[1] && buf[2] === MDX_MAGIC[2] && buf[3] === MDX_MAGIC[3];
-			if (!ok) return { valid: false, error: "魔数校验失败（非 MDX）", magicOk: false };
-			return { valid: true, magicOk: true };
-		} finally {
-			fs.closeSync(fd);
-		}
+		// 统一走 Obsidian Vault API（adapter），桌面/移动一致，符合社区审查要求。
+		// Obsidian 无 range read，扫描阶段只做存在性校验；
+		// 魔数（MDX/MDD 头）完整校验在词典 load 时由 vendor 解析失败自然触发。
+		const stat = await vault.adapter.stat(path);
+		if (!stat) return { valid: false, error: "文件不存在", magicOk: false };
+		return { valid: true, magicOk: null };
 	} catch (e: any) {
 		return { valid: false, error: e?.message ?? "读取失败", magicOk: false };
 	}
 }
 
 async function listFiles(vault: Vault, dir: string): Promise<string[]> {
-	if (Platform.isMobile) {
-		// 移动端：adapter.list 只返回 vault 内相对路径
+	// 统一走 Obsidian Vault API（adapter），桌面/移动一致，符合社区审查要求
+	try {
 		const entries = await vault.adapter.list(dir);
 		return entries.files.filter((f) => !f.toLowerCase().includes("temp"));
-	}
-	const fs = require("fs");
-	const p = require("path");
-	try {
-		return fs
-			.readdirSync(dir, { withFileTypes: true })
-			.filter((d: any) => d.isFile())
-			.map((d: any) => p.join(dir, d.name));
 	} catch (e: any) {
 		return [];
 	}

@@ -1,4 +1,4 @@
-import { Platform, Vault } from "obsidian";
+import { Vault } from "obsidian";
 import { baseName } from "./scanner";
 
 /**
@@ -57,11 +57,8 @@ export class DictResources {
 }
 
 async function readFileText(vault: Vault, f: string): Promise<string> {
-	if (Platform.isMobile) {
-		return await vault.adapter.read(f);
-	}
-	const fs = require("fs");
-	return fs.readFileSync(f, "utf8");
+	// 统一走 Obsidian Vault API（adapter），桌面/移动一致，符合社区审查要求
+	return await vault.adapter.read(f);
 }
 
 function mimeFor(name: string): string {
