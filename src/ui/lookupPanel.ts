@@ -117,7 +117,7 @@ export class LookupPanel {
 		// 内联 display:none 兜底：插件样式表在 Obsidian 启动时可能晚于构造就绪，
 		// 若仅依赖 CSS 隐藏，首帧会以无样式状态渲染出顶部内容块（启动闪一下）。
 		// 内联样式不依赖 CSS 注入时序，显示前清除即可。
-		this.root.style.display = "none";
+		this.root.style.setProperty("display", "none");
 		// 顶部仅保留 header（插件名/输入框/关闭钮）：悬浮形态常驻吸顶不收起；词典 Tab 已移入内容滚动区顶部随内容上走
 		this.topEl = this.root.createDiv({ cls: "lx-top" });
 		const topEl = this.topEl;
@@ -132,14 +132,14 @@ export class LookupPanel {
 		// 顶部大输入框保留作兜底：底部迷你搜索太小或不喜欢时仍可用
 		this.input = header.createEl("input", { cls: "lx-input lx-input-top", attr: { placeholder: "输入单词…", spellcheck: "false" } });
 		this.closeBtn = header.createEl("button", { cls: "lx-icon-btn lx-close", attr: { "aria-label": "关闭" } });
-		this.closeBtn.innerHTML = "✕";
+		this.closeBtn.setText("✕");
 
 		// 悬浮窗常驻关闭钮：悬浮形态始终显示，兜底随时可关闭
 		this.floatClose = this.root.createDiv({
 			cls: "lx-float-close",
 			attr: { "aria-label": "关闭" },
 		});
-		this.floatClose.innerHTML = "✕";
+		this.floatClose.setText("✕");
 
 		this.contentWrap = this.root.createDiv({ cls: "lx-content-wrap" });
 		// 词典 + 分隔线 + AI 区在 inner 内统一滚动：词典全文、AI 回答均为内容自适应高度，超高整体滚动
@@ -180,9 +180,9 @@ export class LookupPanel {
 		this.statusCount = row1.createSpan({ cls: "lx-count", text: "" });
 		row1.createDiv({ cls: "lx-status-spacer" });
 		this.favBtn = row1.createEl("button", { cls: "lx-icon-btn lx-fav", attr: { "aria-label": "收藏到生词本" } });
-		this.favBtn.innerHTML = "☆";
+		this.favBtn.setText("☆");
 		this.speakBtn = row1.createEl("button", { cls: "lx-icon-btn lx-speak", attr: { "aria-label": "发音" } });
-		this.speakBtn.innerHTML = "🔊";
+		this.speakBtn.setText("🔊");
 		// 迷你搜索：尺寸/字号对齐词典胶囊，放行1最右
 		this.searchMini = row1.createEl("input", {
 			cls: "lx-input lx-search-mini",
@@ -191,9 +191,9 @@ export class LookupPanel {
 		const row2 = this.statusEl.createDiv({ cls: "lx-status-row lx-status-row2" });
 		const nav = row2.createDiv({ cls: "lx-nav" });
 		this.prevBtn = nav.createEl("button", { cls: "lx-icon-btn", attr: { "aria-label": "上一个" } });
-		this.prevBtn.innerHTML = "‹";
+		this.prevBtn.setText("‹");
 		this.nextBtn = nav.createEl("button", { cls: "lx-icon-btn", attr: { "aria-label": "下一个" } });
-		this.nextBtn.innerHTML = "›";
+		this.nextBtn.setText("›");
 		// 状态文本（就绪/查询中/错误等），不破坏操作栏结构
 		this.statusText = this.statusEl.createDiv({ cls: "lx-status-text", text: "就绪" });
 	}
@@ -285,7 +285,7 @@ export class LookupPanel {
 		this.saveFocus();
 		this.shown = true;
 		document.body.addClass("lingua-nex-panel-open");
-		this.root.style.display = "";
+		this.root.style.setProperty("display", "");
 		this.backdrop.addClass("shown");
 		this.root.addClass("shown");
 		// 高度内容自适应：初始为紧凑自然高度（无内容不撑满），查词/查 AI 后由内容自然撑大，
@@ -304,7 +304,7 @@ export class LookupPanel {
 		this.shown = true;
 		document.body.addClass("lingua-nex-panel-open");
 		// 悬浮窗不显示暗色遮罩（透明背景正常悬浮），即使此前抽屉形态残留遮罩也一并清除
-		this.root.style.display = "";
+		this.root.style.setProperty("display", "");
 		this.backdrop.removeClass("shown");
 		this.root.addClass("shown");
 		this.root.addClass("lx-floating");
@@ -342,7 +342,7 @@ export class LookupPanel {
 		this.saveFocus();
 		this.shown = true;
 		document.body.addClass("lingua-nex-panel-open");
-		this.root.style.display = "";
+		this.root.style.setProperty("display", "");
 		this.backdrop.removeClass("shown");
 		this.root.addClass("shown");
 		this.root.addClass("lx-floating");
@@ -530,16 +530,16 @@ export class LookupPanel {
 		this.backdrop.removeClass("shown");
 		this.root.removeClass("shown");
 		// 恢复内联 display:none 兜底，与构造时一致：即使样式表异常面板也绝不可见
-		this.root.style.display = "none";
+		this.root.style.setProperty("display", "none");
 		// 清除悬浮形态，回到贴顶抽屉默认样式
 		this.root.removeClass("lx-floating");
 		this.floatClose.removeClass("shown");
 		document.removeEventListener("mousedown", this.outsideClose, true);
-		this.root.style.top = "";
-		this.root.style.left = "";
-		this.root.style.width = "";
-		this.root.style.maxHeight = "";
-		this.root.style.height = "";
+		this.root.style.removeProperty("top");
+		this.root.style.removeProperty("left");
+		this.root.style.removeProperty("width");
+		this.root.style.removeProperty("maxHeight");
+		this.root.style.removeProperty("height");
 		this.root.removeClass("lx-dragging");
 		this.dragState = null;
 		this.resizeState = null;
@@ -919,8 +919,8 @@ export class LookupPanel {
 		const sh = el.scrollHeight;
 		const ch = el.clientHeight;
 		if (sh <= ch) {
-			this.scrollbarThumb.style.height = "0%";
-			this.scrollbarThumb.style.top = "0%";
+			this.scrollbarThumb.style.setProperty("height", "0%");
+			this.scrollbarThumb.style.setProperty("top", "0%");
 			return;
 		}
 		const ratio = ch / sh;
@@ -942,8 +942,8 @@ export class LookupPanel {
 		this.aiHolder?.addClass("lx-ai-hidden");
 		this.divider?.addClass("hidden");
 		if (this.aiHolder) {
-			this.aiHolder.style.flex = "";
-			this.aiHolder.style.height = "";
+			this.aiHolder.style.removeProperty("flex");
+			this.aiHolder.style.removeProperty("height");
 		}
 		this.updateScrollbar();
 	}
@@ -1292,7 +1292,7 @@ export class LookupPanel {
 	async refreshFavState(word?: string): Promise<void> {
 		const w = ((word ?? this.input.value.trim()) || this.currentWord()).trim();
 		const fav = w ? await this.plugin.isFavorited(w) : false;
-		this.favBtn.innerHTML = fav ? "★" : "☆";
+		this.favBtn.setText(fav ? "★" : "☆");
 		this.favBtn.toggleClass("active", fav);
 	}
 

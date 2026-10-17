@@ -94,7 +94,6 @@ export default class LinguaNexPlugin extends Plugin {
 		this.addCommand({
 			id: "lookup-word",
 			name: "打开抽屉查词",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "D" }],
 			callback: () => {
 				// 命令是独立入口：不受设置中查词模式控制，用哪个命令就用哪种形态
 				// 若当前为悬浮形态先收起，再以抽屉形态展示
@@ -639,9 +638,8 @@ export default class LinguaNexPlugin extends Plugin {
 	}
 
 	private async openView(type: string): Promise<void> {
-		const leaf = this.app.workspace.getLeaf("tab");
+		const leaf = this.app.workspace.getLeaf(false);
 		await leaf.setViewState({ type, active: true });
-		this.app.workspace.revealLeaf(leaf);
 	}
 
 	/** 打开生词复习页；book 指定时直接定位到该生词本 */

@@ -234,7 +234,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "LinguaNex 词典" });
+		new Setting(containerEl).setName("LinguaNex 词典").setHeading();
 
 		new Setting(containerEl)
 			.setName("添加词典目录")
@@ -414,7 +414,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	}
 
 
-		containerEl.createEl("h3", { text: "查词" });
+		new Setting(containerEl).setName("查词").setHeading();
 
 		new Setting(containerEl)
 			.setName("查词方式")
@@ -496,7 +496,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 				});
 			});
 
-		containerEl.createEl("h3", { text: "句子翻译引擎" });
+		new Setting(containerEl).setName("句子翻译引擎").setHeading();
 		const trCfg = this.plugin.settings.online.translate;
 		const trInfo = containerEl.createEl("p", {
 			text:
@@ -506,7 +506,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					: "当前：百度翻译开放平台（需 appid 与密钥）"),
 			cls: "lingua-nex-empty",
 		});
-		trInfo.style.margin = "0 0 8px";
+		trInfo.addClass("lx-tr-info");
 		new Setting(containerEl)
 			.setName("翻译引擎")
 			.setDesc("MyMemory 免 Key 可直接用；百度翻译需前往 fanyi-api.baidu.com 申请开放平台密钥")
@@ -544,7 +544,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 				});
 		}
 
-		containerEl.createEl("h3", { text: "发音" });
+		new Setting(containerEl).setName("发音").setHeading();
 
 		new Setting(containerEl)
 			.setName("有道发音变体")
@@ -622,7 +622,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		containerEl.createEl("h3", { text: "PDF 阅读查词" });
+		new Setting(containerEl).setName("PDF 阅读查词").setHeading();
 
 		new Setting(containerEl)
 			.setName("PDF 双击查词")
@@ -648,7 +648,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		containerEl.createEl("h3", { text: "AI 释义（OpenAI 兼容）" });
+		new Setting(containerEl).setName("AI 释义（OpenAI 兼容）").setHeading();
 
 		new Setting(containerEl)
 			.setName("启用 AI 释义")
@@ -817,7 +817,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 				}),
 			);
 
-		containerEl.createEl("h3", { text: "生词本" });
+		new Setting(containerEl).setName("生词本").setHeading();
 
 		new Setting(containerEl)
 			.setName("默认生词本")
@@ -851,7 +851,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		containerEl.createEl("h3", { text: "欧路词典同步" });
+		new Setting(containerEl).setName("欧路词典同步").setHeading();
 
 		containerEl.createEl("p", {
 			text: "将 Obsidian 生词本与欧路词典 App 双向同步。Token 获取：欧路词典官网 → 个人中心 → 开放 API（https://my.eudic.net/OpenAPI）。",
@@ -977,7 +977,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 		});
 
 		// 帮助与常见问题：问号入口，打开说明面板
-		containerEl.createEl("h3", { text: "帮助与常见问题" });
+		new Setting(containerEl).setName("帮助与常见问题").setHeading();
 		new Setting(containerEl)
 			.setName("插件介绍与问题解决")
 			.setDesc("查看功能说明、手动/自动同步机制、常见问题与排查方法")
@@ -991,7 +991,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	/** 帮助面板内容（公开给帮助弹窗复用） */
 	buildHelpBody(containerEl: HTMLElement): void {
 		const sec = (title: string): HTMLElement => {
-			containerEl.createEl("h4", { text: title, cls: "lx-help-h4" });
+			new Setting(containerEl).setName(title).setHeading();
 			return containerEl;
 		};
 		const para = (text: string): void => {
@@ -1174,7 +1174,6 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	private async openView(type: string): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(false);
 		await leaf.setViewState({ type, active: true });
-		this.app.workspace.revealLeaf(leaf);
 	}
 }
 

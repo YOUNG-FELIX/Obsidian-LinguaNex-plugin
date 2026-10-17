@@ -32,10 +32,10 @@ function concat(a, b) {
 
 function rotl(x, n) {
   return x >>> 32 - n | x << n;
-} // eslint-disable-next-line
+}
 
 
-var DIGEST = 128; // eslint-disable-next-line
+var DIGEST = 128;
 
 var BLOCK = 64;
 var S = [[11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8], // round 1
@@ -97,7 +97,7 @@ exports.ripemd128 = function ripemd128(data) {
   padding[0] = [0x80];
   data = new Uint32Array(concat(data, padding).buffer); // ending with check bits (= little endian 64-bit int, 8 * data.length)
 
-  bytes <<= 3; // eslint-disable-next-line
+  bytes <<= 3;
 
   x = concat(data, [bytes, bytes >> 31 >> 1]); // update hash
 

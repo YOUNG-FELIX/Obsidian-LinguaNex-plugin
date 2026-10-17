@@ -1,6 +1,6 @@
 {
   "name": "lingua-nex",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "LinguaNex — 本地 MDX/MDD 词典查词与生词复习 Obsidian 插件",
   "main": "main.js",
   "scripts": {
@@ -17,17 +17,22 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "buffer": "^6.0.3",
     "builtin-modules": "^5.4.0",
     "esbuild": "^0.19.11",
     "obsidian": "latest",
+    "process": "^0.11.10",
     "tslib": "^2.6.2",
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "buffer": "^6.0.3",
-    "events": "^3.3.0",
+    "@babel/runtime": "^7.14.6",
+    "@xmldom/xmldom": "^0.8.12",
+    "doublearray": "0.0.2",
     "mdict-js": "^10.0.1",
-    "process": "^0.11.10",
-    "util": "^0.12.5"
+    "pako": "^1.0.6"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.8.12"
   }
 }

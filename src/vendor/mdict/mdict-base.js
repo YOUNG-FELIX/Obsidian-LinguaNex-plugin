@@ -561,7 +561,6 @@ var MDictBase = /*#__PURE__*/function () {
     key: "_reduceWordKeyBlock",
     value: function _reduceWordKeyBlock(phrase, _s, compareFn) {
       if (!_s || _s == undefined) {
-        // eslint-disable-next-line
         _s = function _s(word) {
           return word;
         };

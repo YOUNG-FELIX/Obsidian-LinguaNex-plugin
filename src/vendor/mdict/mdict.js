@@ -240,7 +240,6 @@ var Mdict = /*#__PURE__*/function (_MdictBase) {
     key: "_binarySearh",
     value: function _binarySearh(list, word, _s, compareFn) {
       if (!_s || _s == undefined) {
-        // eslint-disable-next-line
         _s = this._stripKey();
       }
 

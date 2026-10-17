@@ -366,7 +366,7 @@ var lzo1x = function lzo1x() {
         if (_ret !== this.OK) {
           return _ret === this.EOF_FOUND ? this.OK : _ret;
         }
-      } // eslint-disable-next-line
+      }
 
 
       return this.OK;
@@ -399,7 +399,7 @@ var lzo1x = function lzo1x() {
         dv_hi = this.buf[this.ip + 2] | this.buf[this.ip + 3] << 8;
         dindex = ((dv_lo * 0x429d >>> 16) + dv_hi * 0x429d + dv_lo * 0x1824 & 0xffff) >>> 2;
         m_pos = ip_start + this.dict[dindex];
-        this.dict[dindex] = this.ip - ip_start; // eslint-disable-next-line
+        this.dict[dindex] = this.ip - ip_start;
 
         if ((dv_hi << 16) + dv_lo != (this.buf[m_pos] | this.buf[m_pos + 1] << 8 | this.buf[m_pos + 2] << 16 | this.buf[m_pos + 3] << 24)) {
           this.ip += 1 + (this.ip - ii >> 5);

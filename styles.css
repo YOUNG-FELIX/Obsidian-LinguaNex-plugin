@@ -1763,3 +1763,8 @@ body.lingua-nex-panel-open {
 	gap: 8px;
 	justify-content: flex-end;
 }
+
+/* 设置页词典管理：在线翻译说明段下边距（审查 no-static-styles-assignment 修复） */
+.lingua-nex-empty.lx-tr-info {
+	margin: 0 0 8px;
+}
