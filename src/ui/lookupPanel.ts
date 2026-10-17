@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Component } from "obsidian";
+import { MarkdownRenderer, Component, MarkdownView, type Editor, type EditorPosition } from "obsidian";
 import type LinguaNexPlugin from "../main";
 import type { LinguaNexMdict } from "../core/mdict";
 import type { DictResources } from "../core/resources";
@@ -103,6 +103,8 @@ export class LookupPanel {
 	private shown = false;
 	private sourceSwitchEl: HTMLElement | null = null;
 	private floatClose: HTMLElement;
+	/** 查词面板打开前的来源焦点：关闭时归还，支持查完继续输入 */
+	private savedFocus: { editor: Editor | null; pos: EditorPosition | null; el: HTMLElement | null } | null = null;
 	/** 悬浮窗拖动/缩放状态（仅 lx-floating 形态生效，抽屉形态不参与） */
 	private dragState: { pid: number; sx: number; sy: number; ox: number; oy: number } | null = null;
 	private resizeState: { pid: number; dir: string; sx: number; sy: number; r: DOMRect } | null = null;
@@ -280,6 +282,7 @@ export class LookupPanel {
 	}
 
 	show(): void {
+		this.saveFocus();
 		this.shown = true;
 		document.body.addClass("lingua-nex-panel-open");
 		this.root.style.display = "";
@@ -297,6 +300,7 @@ export class LookupPanel {
 	 * 点外部、点空白或 ✕ 关闭；位置贴近选区，超出视口自动翻转，带圆角边框样式。
 	 */
 	async showAt(word: string, rect: DOMRect): Promise<void> {
+		this.saveFocus();
 		this.shown = true;
 		document.body.addClass("lingua-nex-panel-open");
 		// 悬浮窗不显示暗色遮罩（透明背景正常悬浮），即使此前抽屉形态残留遮罩也一并清除
@@ -335,6 +339,7 @@ export class LookupPanel {
 	 * 与选区悬浮 showAt 的唯一差别是无 rect 时取屏幕中部定位，其余形态、关闭逻辑完全一致。
 	 */
 	async showFloating(word?: string): Promise<void> {
+		this.saveFocus();
 		this.shown = true;
 		document.body.addClass("lingua-nex-panel-open");
 		this.root.style.display = "";
@@ -356,6 +361,45 @@ export class LookupPanel {
 		this.syncTopHeight();
 		document.addEventListener("mousedown", this.outsideClose, true);
 		if (word) await this.lookup(word, true, true);
+	}
+
+	/** 记录打开前的来源焦点（编辑器实例 + 光标 + 活动元素），供关闭时归还 */
+	private saveFocus(): void {
+		const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+		const editor = view?.editor ?? null;
+		this.savedFocus = {
+			editor,
+			pos: editor ? editor.getCursor() : null,
+			el: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+		};
+	}
+
+	/** 关闭时归还焦点：焦点仍在面板内（或落在空白/body）才恢复；用户已切到别的输入处则不打扰 */
+	private restoreFocus(): void {
+		const sf = this.savedFocus;
+		this.savedFocus = null;
+		if (!sf) return;
+		const ae = document.activeElement;
+		if (ae instanceof HTMLElement) {
+			const inPanel = this.root.contains(ae) || this.backdrop.contains(ae);
+			if (!inPanel) {
+				const tag = ae.tagName;
+				const activeInput = tag === "INPUT" || tag === "TEXTAREA" || ae.isContentEditable;
+				if (activeInput) return;
+			}
+		}
+		const restore = (): void => {
+			if (sf.editor) {
+				const ed = sf.editor;
+				ed.focus();
+				if (sf.pos) ed.setCursor(sf.pos);
+			} else if (sf.el && sf.el.isConnected) {
+				sf.el.focus();
+			}
+		};
+		// 立即恢复一次；移动端键盘/编辑器重排较慢，延时多次补焦点与光标，避免被布局抢占
+		restore();
+		[80, 200, 400].forEach((ms) => window.setTimeout(restore, ms));
 	}
 
 	/** 悬浮窗 header（名称/输入框/关闭钮）实际高度同步为 CSS 变量：内容区 margin-top 精确匹配，Tab 已并入内容区无需计入 */
@@ -505,6 +549,8 @@ export class LookupPanel {
 			this.sourceSwitchEl.remove();
 			this.sourceSwitchEl = null;
 		}
+		// 归还焦点：让用户关闭面板后可直接继续在笔记中输入（与 Obsidian 命令面板关闭后恢复输入一致）
+		this.restoreFocus();
 	}
 
 	get visible(): boolean {
