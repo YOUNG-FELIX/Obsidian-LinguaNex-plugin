@@ -36,12 +36,18 @@ jobs:
             main.js
             styles.css
 
-      - name: Create Release
+      - name: Create or update Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          gh release create "$TAG" \
-            main.js manifest.json styles.css versions.json \
-            --title "LinguaNex $TAG" \
-            --generate-notes
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, uploading assets..."
+            gh release upload "$TAG" main.js manifest.json styles.css --clobber
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" \
+              main.js manifest.json styles.css \
+              --title "LinguaNex $TAG" \
+              --generate-notes
+          fi
