@@ -546,6 +546,13 @@ export class VocabReviewView extends ItemView {
 		let idx = 0;
 		let panel: { load: (source: string) => Promise<void> } | null = null;
 		let defOpen = false;
+		// 两段式评级：第一次点击只选定评级并展开释义，第二次点击才确认并进入下一词
+		let picked: 0 | 1 | 2 | null = null;
+		const rbtns = [again, hard, good];
+		const resetPick = (): void => {
+			picked = null;
+			rbtns.forEach((b) => b.removeClass("active"));
+		};
 
 		const show = async (i: number) => {
 			if (i >= deck.length) {
@@ -563,6 +570,7 @@ export class VocabReviewView extends ItemView {
 				e.nextReview ? new Date(e.nextReview).toLocaleDateString() : "随时"
 			}`;
 			metaEl.removeClass("lx-review-status");
+			resetPick();
 			defHost.empty();
 			defOpen = false;
 			defHost.removeClass("open");
@@ -582,26 +590,33 @@ export class VocabReviewView extends ItemView {
 		});
 		const grade = async (g: 0 | 1 | 2) => {
 			const e = deck[idx];
+			// 第一阶段：选定评级 + 展开释义，不写入复习数据，等待二次确认
+			if (picked === null) {
+				picked = g;
+				rbtns.forEach((b) => b.removeClass("active"));
+				(g === 0 ? again : g === 1 ? hard : good).addClass("active");
+				defOpen = true;
+				defHost.addClass("open");
+				defToggle.setText("收起释义 ▴");
+				if (panel) void panel.load("local");
+				const firstLabel = g === 0 ? "忘记" : g === 1 ? "模糊" : "认识";
+				metaEl.textContent = `已选「${firstLabel}」· 看完释义后再点一次评级按钮确认`;
+				metaEl.addClass("lx-review-status");
+				card.scrollIntoView({ behavior: "smooth", block: "start" });
+				return;
+			}
+			// 第二阶段：以本次点击的评级为准写入复习数据，然后直接下一词
 			const updated = applyRating(e, g, this.reviewCfg);
 			await this.plugin.vocab.update(book, e.word, updated);
-			void this.plugin.vocab.logReview(e.word, book, g, updated.proficiency ?? 0, updated.interval ?? 1);
+			void this.plugin.vocab.logReview(
+				e.word,
+				book,
+				g,
+				updated.proficiency ?? 0,
+				updated.interval ?? 1
+			);
 			if (g === 0) deck.push({ ...updated }); // 忘记：本轮末尾再复习一次
-			// 评级即自动展开释义：立即看到词义，不再只有按钮闪一下
-			defOpen = true;
-			defHost.addClass("open");
-			defToggle.setText("收起释义 ▴");
-			if (panel) void panel.load("local");
-			// 已学标记 + 记忆曲线状态：熟练度、间隔天数、下次复习日期
-			const ratingLabel = g === 0 ? "忘记" : g === 1 ? "模糊" : "认识";
-			metaEl.textContent =
-				`✓ ${ratingLabel}（可改）· ${proficiencyLabel(updated)} · ` +
-				`${updated.interval} 天后复习（${
-					updated.nextReview
-						? new Date(updated.nextReview).toLocaleDateString()
-						: "随时"
-				}）`;
-			metaEl.addClass("lx-review-status");
-			card.scrollIntoView({ behavior: "smooth", block: "start" });
+			resetPick();
 			idx += 1;
 			void show(idx);
 		};
