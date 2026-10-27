@@ -16,7 +16,7 @@ import {
 import { LinguaNexMdict } from "./core/mdict";
 import { scanDir, type ScanResult } from "./core/scanner";
 import { DictResources } from "./core/resources";
-import { VocabStore } from "./core/vocab";
+import { VocabStore, VOCAB_ROOT } from "./core/vocab";
 import { EudicService } from "./core/eudic";
 import { LookupPanel, type LookupSource } from "./ui/lookupPanel";
 import { FeatureBar } from "./ui/featureBar";
@@ -74,7 +74,8 @@ export default class LinguaNexPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		this.vocab = new VocabStore(this.app.vault, this.manifest.dir ?? "");
+		// 生词本存放在 vault 内固定目录，便于 Obsidian Sync / Git 同步；旧插件目录作为一次性搬迁来源
+		this.vocab = new VocabStore(this.app.vault, VOCAB_ROOT, this.manifest.dir ?? "");
 		await this.vocab.ensureBase();
 
 		this.pdfHandler = new PdfSelectionHandler(this);

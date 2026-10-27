@@ -16,6 +16,9 @@ export interface DailyStats {
 /** 单次复习记录：[日期 YYYY-MM-DD, 评级 0忘记/1模糊/2认识, 当次熟练度] */
 export type ReviewPoint = [string, 0 | 1 | 2, number];
 
+/** 生词本在 vault 内的固定存放目录（相对仓库根） */
+export const VOCAB_ROOT = "ObsidianFelix/linguanex";
+
 export interface VocabEntry {
 	word: string;
 	dictId: string;
@@ -154,6 +157,8 @@ export class VocabStore {
 	constructor(
 		private vault: Vault,
 		private baseDir: string,
+		/** 旧版插件目录；仅用于首次搬迁，之后不再读写 */
+		private legacyDir = "",
 	) {}
 
 	private bookPath(book: string): string {
@@ -161,10 +166,33 @@ export class VocabStore {
 		return `${this.baseDir}/vocab/${safe}.json`;
 	}
 
+	private async ensureDir(dir: string): Promise<void> {
+		let cur = "";
+		for (const seg of dir.split("/").filter(Boolean)) {
+			cur = cur ? `${cur}/${seg}` : seg;
+			if (!(await this.vault.adapter.exists(cur))) {
+				await this.vault.adapter.mkdir(cur);
+			}
+		}
+	}
+
+	private adopted = false;
+
 	async ensureBase(): Promise<void> {
 		const dir = `${this.baseDir}/vocab`;
-		if (!(await this.vault.adapter.exists(dir))) {
-			await this.vault.adapter.mkdir(dir);
+		await this.ensureDir(dir);
+		if (this.adopted || !this.legacyDir) return;
+		this.adopted = true;
+		// 目标目录还是空的，且旧插件目录里有生词本：复制过来，避免升级后数据“消失”
+		const existing = await this.vault.adapter.list(dir);
+		if (existing.files.some((f) => f.toLowerCase().endsWith(".json"))) return;
+		const legacy = `${this.legacyDir}/vocab`;
+		if (!(await this.vault.adapter.exists(legacy))) return;
+		for (const f of (await this.vault.adapter.list(legacy)).files) {
+			if (!f.toLowerCase().endsWith(".json")) continue;
+			const name = f.split("/").pop();
+			if (!name) continue;
+			await this.vault.adapter.write(`${dir}/${name}`, await this.vault.adapter.read(f));
 		}
 	}
 
