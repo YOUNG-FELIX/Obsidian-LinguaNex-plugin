@@ -1,95 +1,126 @@
 # LinguaNex
 
-Look up words in local MDX/MDD dictionaries, build vocabulary lists, and review them with spaced repetition — on desktop and mobile.
+**English** · [简体中文](README.zh-CN.md)
 
-LinguaNex is a privacy-first dictionary plugin for [Obsidian](https://obsidian.md/). It reads your own `.mdx` / `.mdd` dictionary files (the standard format used by MDict / GoldenDict), so lookups work fully offline. It also bundles online dictionaries, sentence translation, and optional AI-powered explanations for tricky entries.
+[![Release](https://img.shields.io/github/v/release/YOUNG-FELIX/Obsidian-LinguaNex-plugin?label=release&sort=semver)](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases)
+[![Manifest version](https://img.shields.io/github/manifest-json/v/YOUNG-FELIX/Obsidian-LinguaNex-plugin?filename=manifest.json&label=manifest)](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/blob/main/manifest.json)
+[![Downloads](https://img.shields.io/github/downloads/YOUNG-FELIX/Obsidian-LinguaNex-plugin/total?label=downloads)](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases)
+[![Obsidian](https://img.shields.io/badge/Obsidian-%E2%89%A5%201.4.0-483699?logo=obsidian&logoColor=white)](https://obsidian.md)
+[![Platform](https://img.shields.io/badge/platform-desktop%20%7C%20mobile-blue)](#compatibility)
+[![License](https://img.shields.io/github/license/YOUNG-FELIX/Obsidian-LinguaNex-plugin?label=license)](LICENSE)
+[![Build](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/actions/workflows/release.yml/badge.svg)](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/actions/workflows/release.yml)
+[![Last commit](https://img.shields.io/github/last-commit/YOUNG-FELIX/Obsidian-LinguaNex-plugin)](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/commits/main)
+[![Stars](https://img.shields.io/github/stars/YOUNG-FELIX/Obsidian-LinguaNex-plugin?style=social)](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/stargazers)
+
+Offline-first dictionary lookup, vocabulary collection and spaced-repetition review for [Obsidian](https://obsidian.md) — on desktop and mobile.
+
+LinguaNex reads your own `.mdx` / `.mdd` files (the MDict / GoldenDict format), so lookups work fully offline. Online dictionaries, sentence translation and optional AI definitions can be layered on top.
+
+---
 
 ## Features
 
-- **Offline dictionary lookup** — parse local `.mdx` / `.mdd` files (MDict / GoldenDict format) with no network required.
-- **Floating lookup popover** — hover over a word to see its definition right where you are reading.
-- **Lookup panel** — open a dedicated word-lookup panel, docked into the content area for a clean reading experience.
-- **Vocabulary book & spaced review** — save words to your own vocabulary list and review them later.
-- **Online dictionaries** — 有道 (Youdao) and Free Dictionary as optional online sources.
-- **Sentence translation** — translate selected sentences via online services.
-- **AI-powered explanations** — optional AI definitions and example sentences, with configurable providers:
-  - OpenAI
-  - DeepSeek
-  - Moonshot (Kimi)
-  - Zhipu GLM
-  - Qwen (Tongyi Qianwen)
-  - Groq
-  - Ollama (local models)
-- **PDF word selection** — look up words selected inside PDFs.
-- **Mobile friendly** — works on Obsidian mobile; no desktop-only API is required.
+- **Offline MDX/MDD lookup** — parse local `.mdx` (and optional `.mdd` media) dictionaries with no network required.
+- **Drawer panel** — a bottom sheet with multi-dictionary tabs, keyboard tab switching, and Esc to close.
+- **Floating popover** — compact definition popover anchored next to the selected word.
+- **Vocabulary books** — save words to one or more books; entries stay small (word + review state), definitions are resolved live at review time.
+- **Two-step spaced review** — rate a card once to reveal the definition, rate again to commit the result and advance. Scheduling uses ease factor, streak and per-proficiency intervals.
+- **Learning heatmap** — month view of daily review volume (capped at 3 reviews per word per day), with a day detail panel: words reviewed, unique words, forgot / fuzzy / known split, average proficiency, accuracy and the word list.
+- **Pronunciation** — local `.mdd` audio first, then Youdao / Free Dictionary audio, then system TTS. A dedicated command (default `Mod+Shift+P`) speaks the panel word or the current selection.
+- **Online sources** — Youdao, Free Dictionary, and sentence translation (MyMemory / Baidu Translate), each toggleable.
+- **AI explanations** — OpenAI-compatible providers: OpenAI, DeepSeek, Moonshot (Kimi), Zhipu GLM, Qwen, Groq, Ollama (local).
+- **PDF selection lookup** — look up words selected inside PDFs.
+- **Eudic sync** — push vocabulary to Eudic (manual).
+- **Privacy-first** — no telemetry; settings and API keys stay in your vault.
 
 ## Installation
 
-### Community plugins directory
+### Community plugins
 
-LinguaNex is submitted to the [Obsidian community plugins](https://obsidian.md/plugins) directory. Once approved, install it from **Settings → Community plugins → Browse**, search for "LinguaNex", and enable it.
+LinguaNex is being submitted to the Obsidian community plugin directory. Once listed, install it from **Settings → Community plugins → Browse**, search for “LinguaNex”, then enable it.
 
 ### Manual installation
 
-1. Download the latest release (`lingua-nex-<version>.zip`) from the [GitHub Releases](https://github.com/<your-account>/lingua-nex/releases) page.
-2. Unzip it into your vault's plugin folder: `<vault>/.obsidian/plugins/lingua-nex/`.
-3. Restart Obsidian (or reload the plugin) and enable **LinguaNex** in **Settings → Community plugins**.
+1. Download `main.js`, `manifest.json`, `styles.css` (or `lingua-nex-<version>.zip`) from [Releases](https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/releases).
+2. Copy them into `<vault>/.obsidian/plugins/lingua-nex/`.
+3. Reload Obsidian and enable **LinguaNex** in **Settings → Community plugins**.
 
-### BRAT (for testing pre-release builds)
+### BRAT (pre-release builds)
 
-1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin.
-2. Run command **BRAT: Add a beta plugin for testing** and enter `https://github.com/<your-account>/lingua-nex`.
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat).
+2. Run **BRAT: Add a beta plugin for testing** and enter `YOUNG-FELIX/Obsidian-LinguaNex-plugin`.
 3. Enable **LinguaNex** in **Settings → Community plugins**.
 
-## Usage
+## Getting started
 
-### Commands
+1. Put your dictionaries anywhere in the vault, then add that folder in **Settings → LinguaNex → Add dictionary folder**. The folder search runs against Obsidian's in-memory file tree, so it is instant.
+2. Enable the dictionaries you want under **Discovered dictionaries**; reorder them to set lookup priority.
+3. Select a word in a note or PDF and run **Look up word** (drawer) or **Look up (hover)** (popover).
 
-| Command | Description |
+> Dictionary files can live in any vault folder — only the folders you explicitly add are scanned. Nothing is scanned automatically at startup.
+
+## Commands
+
+| Command | ID | Description |
+| --- | --- | --- |
+| Look up word | `lookup-word` | Open the drawer lookup panel. |
+| Look up (hover) | `lookup-hover` | Popover next to the selection; opens the panel when nothing is selected. |
+| Close lookup panel | `close-panel` | Close the current panel. |
+| Open dictionary manager | `open-manager` | Manage local / online dictionaries and ordering. |
+| Open word review | `open-review` | Open spaced-repetition review. |
+| Toggle favorite | `fav-toggle` | Toggle the panel word (or the selection) in your vocabulary book. |
+| Pronounce | `pronounce-current` | Speak the panel word (or the selection). Default hotkey: `Mod+Shift+P`. |
+
+All commands can be rebound in **Settings → Hotkeys**.
+
+## Data & sync
+
+- Vocabulary books: `<vault>/linguanex/vocab/<book>.json` (vault-relative, so any vault name works).
+- The folder is created once when the plugin is enabled; if it is later removed, it is recreated when you next add a word.
+- Review history lives in each entry's `hist` field as `[date, rating, proficiency]`; there is no separate log file.
+- Because data lives inside the vault, it syncs with Obsidian Sync / Git like normal notes. Back up the json to keep your history.
+
+## Settings overview
+
+| Section | What it controls |
 | --- | --- |
-| `LinguaNex: Look up word` | Open the lookup panel for the selected word (or the word at cursor). |
-| `LinguaNex: Look up (hover)` | With a selection, show the definition in a floating popover next to it; without a selection, open the lookup panel. |
-| `LinguaNex: Close lookup panel` | Close the current lookup panel. |
-| `LinguaNex: Open dictionary manager` | Manage installed MDX/MDD dictionaries and online sources. |
-| `LinguaNex: Open word review` | Open the spaced-repetition review for your vocabulary book. |
-| `LinguaNex: Save selected word` | Add the selected word to your vocabulary book. |
-
-Assign hotkeys to these commands in **Settings → Hotkeys** for fastest access.
-
-### Lookup flow
-
-1. Select a word in any note (or PDF).
-2. Trigger **Look up word** or **Look up (hover)**.
-3. Read the definition from your local dictionary, online sources, or the AI provider — whichever is enabled.
-4. Optionally save the word to your vocabulary book for later review.
-
-### Dictionaries
-
-- **Local MDX/MDD**: drop your `.mdx` (and optional `.mdd` media) files into the folder configured in settings, then add them in the dictionary manager. Lookups are instant and offline.
-- **Online sources**: enable 有道 (Youdao) or Free Dictionary in settings for fallback lookups.
-- **Sentence translation**: enable the online translation source to translate full sentences.
-
-### AI explanations
-
-In **Settings → AI**, choose a provider, enter your API key / base URL, and enable AI explanations. Lookup results will include AI-generated definitions, usage notes, or example sentences. Ollama users can point the base URL at a local model — no data leaves your machine.
+| LinguaNex dictionaries | Dictionary folders, discovered dictionaries, enable/disable and priority. |
+| Lookup | Drawer vs. hover mode, selection toolbar, auto lookup. |
+| Sentence translation | Translation engine and credentials. |
+| Pronunciation | Local `.mdd` audio, Youdao, Free Dictionary, TTS, accent variant. |
+| PDF lookup | Enable PDF selection lookup and context menu. |
+| AI explanations | Provider, base URL, model, API key, prompt, ratio. |
+| Vocabulary | Default book, review algorithm parameters, new-word limits. |
+| Eudic sync | Token, language, category, sync mode. |
 
 ## Development
 
-The plugin is written in TypeScript and built with `tsc` + `esbuild`.
+TypeScript + `tsc` (type check) + `esbuild` (bundle).
 
 ```bash
-git clone https://github.com/<your-account>/lingua-nex.git
-cd lingua-nex
+git clone https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin.git
+cd Obsidian-LinguaNex-plugin
 npm install
-npm run build
+npm run dev     # watch mode
+npm run build   # type check + production bundle
 ```
 
-`npm run build` produces `main.js`, `manifest.json`, and `styles.css` for the release.
+`npm run build` emits `main.js`, `manifest.json` and `styles.css`.
 
 ## Compatibility
 
-- Obsidian `>= 1.4.0` (desktop and mobile).
-- MDX/MDD dictionaries must be in MDict / GoldenDict format.
+- Obsidian `>= 1.4.0`, desktop and mobile.
+- Dictionaries must be valid MDict / GoldenDict `.mdx` files (`.mdd` optional, for audio and images).
+
+## Troubleshooting
+
+- **No dictionaries found** — confirm the folder was added in settings and contains `.mdx` files; the scan is not recursive into folders you did not add.
+- **Lookup misses a word** — try another dictionary tab, or check that the dictionary is enabled and ordered above others.
+- **No audio** — enable the pronunciation sources you want; `.mdd` audio is used first, then online audio, then TTS.
+
+## Contributing
+
+Issues and pull requests are welcome. Please include your Obsidian version, platform and steps to reproduce. Run `npm run build` before opening a PR.
 
 ## License
 
