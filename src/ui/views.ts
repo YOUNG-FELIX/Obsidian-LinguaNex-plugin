@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, Modal, Notice, Setting, App, MarkdownRenderer,
 import type LinguaNexPlugin from "../main";
 import type { LinguaNexMdict } from "../core/mdict";
 import type { DictItem, LinguaNexSettings } from "../settings";
-import { applyRating, sortByDue, DEFAULT_REVIEW, type ReviewConfig } from "../core/vocab";
+import { applyRating, sortByDue, DEFAULT_REVIEW, type ReviewConfig, type DailyStats } from "../core/vocab";
 import type { VocabEntry } from "../core/vocab";
 import { aiLookupStream } from "../core/ai";
 
@@ -465,7 +465,9 @@ export class VocabReviewView extends ItemView {
 					text: label,
 				});
 				btn.addEventListener("click", async () => {
-					await this.plugin.vocab.update(book, e.word, applyRating(e, g, this.reviewCfg));
+					const updated = applyRating(e, g, this.reviewCfg);
+					await this.plugin.vocab.update(book, e.word, updated);
+					void this.plugin.vocab.logReview(e.word, book, g, updated.proficiency ?? 0, updated.interval ?? 1);
 					// 评级后自动展开释义，方便核对；不重绘、不移位，保留当前行位置
 					open = true;
 					defHost.addClass("open");
@@ -533,11 +535,7 @@ export class VocabReviewView extends ItemView {
 			cls: "lx-def-toggle",
 			text: "显示释义 ▾",
 		});
-		// v0.8.5：下一词按钮紧跟释义按钮（同一行右侧），不再位于评级按钮行
-		const nextBtn = card.createEl("button", {
-			cls: "lx-rbtn lx-next",
-			text: "下一词 →",
-		});
+
 		const defHost = card.createDiv({ cls: "lx-def-host" });
 		const btns = root.createDiv({ cls: "lx-review-btns" });
 		const again = btns.createEl("button", { cls: "lx-rbtn", text: "忘记" });
@@ -548,17 +546,8 @@ export class VocabReviewView extends ItemView {
 		let idx = 0;
 		let panel: { load: (source: string) => Promise<void> } | null = null;
 		let defOpen = false;
-		// 评级后下一词按钮常驻：收起释义不再连带隐藏（v0.8.3）
-		let graded = false;
-		let autoTimer: number | null = null;
-		const clearAuto = (): void => {
-			if (autoTimer != null) {
-				window.clearTimeout(autoTimer);
-				autoTimer = null;
-			}
-		};
+
 		const show = async (i: number) => {
-			clearAuto();
 			if (i >= deck.length) {
 				root.empty();
 				root.createEl("p", {
@@ -574,16 +563,13 @@ export class VocabReviewView extends ItemView {
 				e.nextReview ? new Date(e.nextReview).toLocaleDateString() : "随时"
 			}`;
 			metaEl.removeClass("lx-review-status");
-			graded = false;
 			defHost.empty();
 			defOpen = false;
 			defHost.removeClass("open");
 			defToggle.setText("显示释义 ▾");
 			panel = makeDefPanel(this.plugin, defHost, e);
-			again.classList.remove("hidden");
-			hard.classList.remove("hidden");
-			good.classList.remove("hidden");
-			nextBtn.classList.add("hidden");
+
+
 			counter.textContent = `${i + 1} / ${deck.length}`;
 			card.addClass("pop");
 			window.setTimeout(() => card.removeClass("pop"), 300);
@@ -593,13 +579,12 @@ export class VocabReviewView extends ItemView {
 			defHost.toggleClass("open", defOpen);
 			defToggle.setText(defOpen ? "收起释义 ▴" : "显示释义 ▾");
 			if (defOpen && panel) void panel.load("local");
-		// 展开释义后可直接点「下一词」切换（浏览模式无需评级）；评级后收起释义不再连带隐藏
-		if (!graded) nextBtn.classList.toggle("hidden", !defOpen);
 		});
 		const grade = async (g: 0 | 1 | 2) => {
 			const e = deck[idx];
 			const updated = applyRating(e, g, this.reviewCfg);
 			await this.plugin.vocab.update(book, e.word, updated);
+			void this.plugin.vocab.logReview(e.word, book, g, updated.proficiency ?? 0, updated.interval ?? 1);
 			if (g === 0) deck.push({ ...updated }); // 忘记：本轮末尾再复习一次
 			// 评级即自动展开释义：立即看到词义，不再只有按钮闪一下
 			defOpen = true;
@@ -607,31 +592,22 @@ export class VocabReviewView extends ItemView {
 			defToggle.setText("收起释义 ▴");
 			if (panel) void panel.load("local");
 			// 已学标记 + 记忆曲线状态：熟练度、间隔天数、下次复习日期
+			const ratingLabel = g === 0 ? "忘记" : g === 1 ? "模糊" : "认识";
 			metaEl.textContent =
-				`✓ 已学 · ${proficiencyLabel(updated)} · ` +
+				`✓ ${ratingLabel}（可改）· ${proficiencyLabel(updated)} · ` +
 				`${updated.interval} 天后复习（${
 					updated.nextReview
 						? new Date(updated.nextReview).toLocaleDateString()
 						: "随时"
 				}）`;
 			metaEl.addClass("lx-review-status");
-			again.classList.add("hidden");
-			hard.classList.add("hidden");
-			good.classList.add("hidden");
-			graded = true;
-			nextBtn.classList.remove("hidden");
 			card.scrollIntoView({ behavior: "smooth", block: "start" });
-			// 不自动跳卡：展开释义后停留，卡片需要多看一会，看完再点「下一词 →」手动切换
-			clearAuto();
+			idx += 1;
+			void show(idx);
 		};
 		again.addEventListener("click", () => void grade(0));
 		hard.addEventListener("click", () => void grade(1));
 		good.addEventListener("click", () => void grade(2));
-		nextBtn.addEventListener("click", () => {
-			clearAuto();
-			idx += 1;
-			void show(idx);
-		});
 		void show(0);
 	}
 
@@ -668,6 +644,8 @@ export class VocabReviewView extends ItemView {
 				row.createSpan({ cls: "lx-plan-tag", text: proficiencyLabel(e) });
 			}
 		}
+		// 月历热力图：每日复习量
+		await this.renderHeatmap(root, book);
 		// 复习数据面板底部：折叠的算法参数设置（可直接展开改参）
 		this.renderAlgoSettings(root);
 	}
@@ -746,6 +724,158 @@ export class VocabReviewView extends ItemView {
 			new Notice("已恢复默认复习参数");
 			this.render();
 		});
+	}
+
+	/** 复习热力图：月历 + 每日详情 popover */
+	private async renderHeatmap(root: HTMLElement, book: string): Promise<void> {
+		const wrap = root.createDiv({ cls: "lx-heatmap" });
+		wrap.createEl("h3", { text: "📊 学习热力图" });
+
+		const now = new Date();
+		let year = now.getFullYear();
+		let month = now.getMonth(); // 0-based
+
+		// 头部：年月切换
+		const head = wrap.createDiv({ cls: "lx-hm-head" });
+		const prevBtn = head.createEl("button", { cls: "lx-hm-nav", text: "‹" });
+		const monthLabel = head.createEl("span", { cls: "lx-hm-label" });
+		const nextBtn = head.createEl("button", { cls: "lx-hm-nav", text: "›" });
+
+		// 星期表头
+		const weekdayRow = wrap.createDiv({ cls: "lx-hm-weekdays" });
+		for (const d of ["一", "二", "三", "四", "五", "六", "日"]) {
+			weekdayRow.createEl("span", { text: d });
+		}
+		// 月历格（6 行 × 7 列 = 42 格）
+		const grid = wrap.createDiv({ cls: "lx-hm-grid" });
+
+		const popover = document.createElement("div");
+		popover.addClass("lx-hm-popover");
+		popover.style.display = "none";
+		document.body.appendChild(popover);
+		const closePopover = (): void => {
+			popover.style.display = "none";
+			popover.empty();
+		};
+		wrap.addEventListener("click", (e) => {
+			if (!wrap.contains(e.target as Node)) closePopover();
+		});
+
+		const MAX_LEVEL = 4; // 4 档 + 空
+		const render = async (): Promise<void> => {
+			monthLabel.setText(`${year} 年 ${month + 1} 月`);
+			grid.empty();
+			const daily = await this.plugin.vocab.getDailyStats(year, month);
+			// 找最大 count 来定 4 档阈值
+			let maxCount = 0;
+			daily.forEach((s) => { if (s.count > maxCount) maxCount = s.count; });
+			// 4 档阈值：max 的 25%/50%/75%
+			const t1 = Math.ceil(maxCount * 0.25);
+			const t2 = Math.ceil(maxCount * 0.5);
+			const t3 = Math.ceil(maxCount * 0.75);
+			const levelOf = (c: number): number => {
+				if (c === 0) return 0;
+				if (c <= t1) return 1;
+				if (c <= t2) return 2;
+				if (c <= t3) return 3;
+				return 4;
+			};
+
+			const firstDay = new Date(year, month, 1);
+			// 周一起始（把 JS 周日 0 转周一为 0）
+			let offset = firstDay.getDay() - 1;
+			if (offset < 0) offset = 6;
+			const daysInMonth = new Date(year, month + 1, 0).getDate();
+			const prevMonthDays = new Date(year, month, 0).getDate();
+
+			for (let i = 0; i < 42; i++) {
+				let day: number;
+				let isCurMonth = true;
+				if (i < offset) {
+					day = prevMonthDays - offset + 1 + i;
+					isCurMonth = false;
+				} else if (i >= offset + daysInMonth) {
+					day = i - offset - daysInMonth + 1;
+					isCurMonth = false;
+				} else {
+					day = i - offset + 1;
+				}
+				const cell = grid.createEl("div", { cls: "lx-hm-cell" });
+				if (!isCurMonth) cell.addClass("off");
+				const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+				const stats = daily.get(dateStr);
+				if (stats) {
+					const lv = levelOf(stats.count);
+					cell.addClass(`lv-${lv}`);
+					cell.textContent = String(day);
+					cell.title = `${dateStr}：复习 ${stats.count} 词，去重 ${stats.uniqueWords.size} 词`;
+					// 点击弹详情 popover
+					cell.addEventListener("click", () => {
+						closePopover();
+						popover.style.display = "";
+						const r = cell.getBoundingClientRect();
+						popover.style.left = `${Math.min(r.left, window.innerWidth - 260)}px`;
+						popover.style.top = `${r.bottom + 4}px`;
+						this.renderDayPopover(popover, dateStr, stats);
+					});
+				} else {
+					cell.textContent = String(day);
+				}
+			}
+		};
+
+		prevBtn.addEventListener("click", () => {
+			month -= 1;
+			if (month < 0) { month = 11; year -= 1; }
+			void render();
+		});
+		nextBtn.addEventListener("click", () => {
+			month += 1;
+			if (month > 11) { month = 0; year += 1; }
+			void render();
+		});
+		wrap.addEventListener("click", (e) => {
+			if (!e.target) return;
+			// 点 wrap 外关闭 popover
+			if (!popover.contains(e.target as Node) && !(e.target as HTMLElement).closest?.(".lx-hm-cell")) {
+				closePopover();
+			}
+		});
+
+
+		// 渲染（render 是 async，用 void 挂起）
+		void render();
+	}
+
+	private renderDayPopover(pop: HTMLElement, dateStr: string, s: DailyStats): void {
+		pop.empty();
+		pop.createEl("div", { cls: "lx-hm-pop-date", text: dateStr });
+
+		const pct = (part: number, total: number): string =>
+			total === 0 ? "—" : `${Math.round((part / total) * 100)}%`;
+		const avgProf = s.proficiencyCount > 0
+			? (s.proficiencySum / s.proficiencyCount).toFixed(1) : "—";
+		const correctRate = s.count > 0
+			? `${pct(s.known + s.fuzzy, s.count)}（认识+模糊计对）` : "—";
+
+		const body = pop.createDiv({ cls: "lx-hm-pop-body" });
+		body.createEl("div", { text: `总复习次数：${s.count}`, cls: "lx-hm-pop-row" });
+		body.createEl("div", { text: `去重词数：${s.uniqueWords.size}`, cls: "lx-hm-pop-row" });
+		body.createEl("div", { text: `认识 ${s.known} · 模糊 ${s.fuzzy} · 忘记 ${s.forgot}`, cls: "lx-hm-pop-row" });
+		body.createEl("div", { text: `平均熟练度：${avgProf}`, cls: "lx-hm-pop-row" });
+		body.createEl("div", { text: `正确率：${correctRate}`, cls: "lx-hm-pop-row" });
+
+		if (s.words.length) {
+			pop.createEl("div", { cls: "lx-hm-pop-divider" });
+			const wordBox = pop.createDiv({ cls: "lx-hm-pop-words" });
+			for (const w of s.words.slice(0, 30)) {
+				const chip = wordBox.createEl("span", { cls: "lx-hm-chip", text: w });
+				chip.title = `${w}（当日复习 ${s.wordCountMap.get(w)} 次）`;
+			}
+			if (s.words.length > 30) {
+				wordBox.createEl("span", { cls: "lx-hm-chip more", text: `+${s.words.length - 30}` });
+			}
+		}
 	}
 }
 

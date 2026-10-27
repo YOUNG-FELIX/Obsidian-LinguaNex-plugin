@@ -1,5 +1,27 @@
 import { Vault } from "obsidian";
 
+export interface ReviewLogEntry {
+	word: string;
+	book: string;
+	rating: 0 | 1 | 2;
+	at: number;
+	proficiencyAfter: number;
+	intervalAfter: number;
+}
+
+export interface DailyStats {
+	date: string;
+	count: number;       // 同词同日最多 3 次后的实际计入次数
+	forgot: number;
+	fuzzy: number;
+	known: number;
+	proficiencySum: number;
+	proficiencyCount: number;
+	uniqueWords: Set<string>;
+	wordCountMap: Map<string, number>;
+	words: string[];     // 当日去重词条（首次出现顺序）
+}
+
 export interface VocabEntry {
 	word: string;
 	dictId: string;
@@ -7,39 +29,23 @@ export interface VocabEntry {
 	addedAt: number;
 	reviewCount: number;
 	lastReviewAt?: number;
-	/** 收录时所在上下文片段（截断 80 字） */
 	context?: string;
-	/** SM-2：熟练度 0 陌生 / 1 渐熟 / 2 熟悉 */
 	proficiency?: number;
-	/** SM-2：连续答对次数（晋级计数） */
 	consecutiveCorrect?: number;
-	/** SM-2：间隔天数（1 / 3 / 7 …） */
 	interval?: number;
-	/** SM-2：难度系数，默认 2.5，范围 [1.3, 3] */
 	easeFactor?: number;
-	/** SM-2：上次复习时间戳 */
 	lastReviewed?: number;
-	/** SM-2：下次到期复习时间戳 */
 	nextReview?: number;
 }
 
-/** SM-2 复习算法可调参数（复习页「算法参数设置」折叠面板可配置） */
 export interface ReviewConfig {
-	/** 陌生评级后的间隔天数 */
 	intervalNew: number;
-	/** 渐熟评级后的间隔天数 */
 	intervalFamiliar: number;
-	/** 熟悉评级后的间隔天数 */
 	intervalKnown: number;
-	/** 认识评级 easeFactor 增加步长 */
 	easeStep: number;
-	/** 忘记评级 easeFactor 扣减量 */
 	easePenalty: number;
-	/** 模糊评级晋级（渐熟）所需连对次数 */
 	hardStreak: number;
-	/** 认识评级晋级（熟悉）所需连对次数 */
 	goodStreak: number;
-	/** 复习数据面板展示的未来天数 */
 	planDays: number;
 }
 
@@ -54,12 +60,6 @@ export const DEFAULT_REVIEW: ReviewConfig = {
 	planDays: 30,
 };
 
-/**
- * SM-2 评级（参考 fleurdict flashcard-engine，按规划 2.5 三档简化）：
- * 0=忘记（重置熟练度，easeFactor-扣减）；1=模糊（连对 hardStreak 次晋级渐熟）；
- * 2=认识（熟悉需连对 goodStreak 次，easeFactor 递增）。
- * 间隔阶梯：proficiency 0 → intervalNew 天；1 → intervalFamiliar 天；2 → intervalKnown 天。
- */
 export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<ReviewConfig>): VocabEntry {
 	const c: ReviewConfig = { ...DEFAULT_REVIEW, ...(cfg ?? {}) };
 	const now = Date.now();
@@ -74,12 +74,10 @@ export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<Revi
 	next.easeFactor = e.easeFactor ?? 2.5;
 
 	if (rating === 0) {
-		// 忘记：重置
 		next.proficiency = 0;
 		next.consecutiveCorrect = 0;
 		next.easeFactor = Math.max(1.3, next.easeFactor - c.easePenalty);
 	} else if (rating === 1) {
-		// 模糊：连对 hardStreak 次晋级渐熟
 		next.consecutiveCorrect += 1;
 		if (next.consecutiveCorrect >= c.hardStreak) {
 			next.proficiency = Math.max(next.proficiency, 1);
@@ -89,7 +87,6 @@ export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<Revi
 			next.easeFactor = Math.min(3, next.easeFactor + c.easeStep / 2);
 		}
 	} else {
-		// 认识：晋级熟悉
 		next.consecutiveCorrect += 1;
 		if (next.proficiency === 0 && next.consecutiveCorrect >= c.hardStreak) {
 			next.proficiency = 2;
@@ -113,7 +110,6 @@ export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<Revi
 	return next;
 }
 
-/** 按复习算法排序：该复习的在前（已到期/未安排），再按到期时间由近到远 */
 export function sortByDue(entries: VocabEntry[], now = Date.now()): VocabEntry[] {
 	return [...entries].sort((a, b) => {
 		const aDue = a.nextReview === undefined || a.nextReview <= now;
@@ -123,17 +119,18 @@ export function sortByDue(entries: VocabEntry[], now = Date.now()): VocabEntry[]
 	});
 }
 
-/** 复习计划分组：一组词条共享一个到期偏移（0=今天已到期，-1=未安排，N=未来第 N 天） */
 export interface ScheduleGroup {
-	/** 距今天数：-1=未安排随时可复习；0=今天已到期（含过期）；>0 为未来第 N 天 */
 	dayOffset: number;
 	label: string;
 	count: number;
 	entries: VocabEntry[];
 }
 
-/** 生词本数据层：以 JSON 数组文件存储在 vault 内 <baseDir>/vocab/<book>.json */
 export class VocabStore {
+	private static readonly DATE_FMT = new Intl.DateTimeFormat("en-CA", {
+		year: "numeric", month: "2-digit", day: "2-digit",
+	});
+
 	constructor(
 		private vault: Vault,
 		private baseDir: string,
@@ -142,6 +139,10 @@ export class VocabStore {
 	private bookPath(book: string): string {
 		const safe = book.replace(/[\\/:*?"<>|]/g, "_");
 		return `${this.baseDir}/vocab/${safe}.json`;
+	}
+
+	private logPath(): string {
+		return `${this.baseDir}/vocab/_review-log.json`;
 	}
 
 	async ensureBase(): Promise<void> {
@@ -197,7 +198,7 @@ export class VocabStore {
 			if (!(await this.vault.adapter.exists(p))) return [];
 			const raw = await this.vault.adapter.read(p);
 			return JSON.parse(raw || "[]");
-		} catch (e) {
+		} catch {
 			return [];
 		}
 	}
@@ -227,12 +228,11 @@ export class VocabStore {
 		await this.save(book, list);
 	}
 
-	/** 到期复习队列：nextReview 为空（旧词条/从未复习）或已到期的词条 */
 	async dueEntries(book: string, now = Date.now()): Promise<VocabEntry[]> {
 		const list = await this.entries(book);
 		return list.filter((e) => e.nextReview === undefined || e.nextReview <= now);
 	}
-	/** 复习计划：按到期日由近到远分组（未安排 → 今天到期 → 明天 → N 天后），供复习数据面板展示 */
+
 	async schedule(book: string, horizonDays = 30, now = Date.now()): Promise<ScheduleGroup[]> {
 		const list = await this.entries(book);
 		const DAY = 24 * 60 * 60 * 1000;
@@ -271,6 +271,89 @@ export class VocabStore {
 			g.entries.sort((a, b) => (a.nextReview ?? a.addedAt) - (b.nextReview ?? b.addedAt));
 		}
 		return sorted;
+	}
+
+	// ===== Review Log（热力图数据源）=====
+
+	async logReview(
+		word: string,
+		book: string,
+		rating: 0 | 1 | 2,
+		proficiencyAfter: number,
+		intervalAfter: number,
+	): Promise<void> {
+		await this.ensureBase();
+		let entries: ReviewLogEntry[] = [];
+		try {
+			if (await this.vault.adapter.exists(this.logPath())) {
+				const raw = await this.vault.adapter.read(this.logPath());
+				entries = JSON.parse(raw || "[]");
+			}
+		} catch {
+			entries = [];
+		}
+		entries.push({
+			word, book, rating,
+			at: Date.now(),
+			proficiencyAfter, intervalAfter,
+		});
+		if (entries.length > 200_000) entries = entries.slice(-200_000);
+		await this.vault.adapter.write(this.logPath(), JSON.stringify(entries));
+	}
+
+	private async readLog(): Promise<ReviewLogEntry[]> {
+		try {
+			if (!(await this.vault.adapter.exists(this.logPath()))) return [];
+			const raw = await this.vault.adapter.read(this.logPath());
+			return JSON.parse(raw || "[]");
+		} catch {
+			return [];
+		}
+	}
+
+	private dateKey(d: Date): string {
+		return VocabStore.DATE_FMT.format(d);
+	}
+
+	/** 聚合某月复习统计；同词同日多次最多计 3 次 */
+	async getDailyStats(year: number, month: number): Promise<Map<string, DailyStats>> {
+		const entries = await this.readLog();
+		const daily = new Map<string, DailyStats>();
+		const MAX = 3;
+		for (const e of entries) {
+			const d = new Date(e.at);
+			if (d.getFullYear() !== year || d.getMonth() !== month) continue;
+			const key = this.dateKey(d);
+			let s = daily.get(key);
+			if (!s) {
+				s = {
+					date: key,
+					count: 0,
+					forgot: 0,
+					fuzzy: 0,
+					known: 0,
+					proficiencySum: 0,
+					proficiencyCount: 0,
+					uniqueWords: new Set(),
+					wordCountMap: new Map(),
+					words: [],
+				};
+				daily.set(key, s);
+			}
+			const prev = s.wordCountMap.get(e.word) ?? 0;
+			if (prev < MAX) {
+				s.wordCountMap.set(e.word, prev + 1);
+				s.count += 1;
+				s.uniqueWords.add(e.word);
+				if (prev === 0) s.words.push(e.word);
+				if (e.rating === 0) s.forgot += 1;
+				else if (e.rating === 1) s.fuzzy += 1;
+				else s.known += 1;
+				s.proficiencySum += e.proficiencyAfter;
+				s.proficiencyCount += 1;
+			}
+		}
+		return daily;
 	}
 
 	private async save(book: string, list: VocabEntry[]): Promise<void> {

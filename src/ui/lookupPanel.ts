@@ -211,7 +211,7 @@ export class LookupPanel {
 							this.activeSourceId = first.id;
 							this.renderTabs();
 						}
-						void this.lookup(w);
+						void this.lookup(w, true, false, true);
 					}
 				} else if (e.key === "Escape") {
 					e.preventDefault();
@@ -261,12 +261,16 @@ export class LookupPanel {
 
 	private renderTabs(): void {
 		this.tabsEl.empty();
+		let activeTab: HTMLElement | null = null;
 		for (const s of this.sources) {
+			const isActive = s.id === this.activeSourceId;
 			const tab = this.tabsEl.createEl("button", {
-				cls: "lx-tab" + (s.id === this.activeSourceId ? " active" : ""),
+				cls: "lx-tab" + (isActive ? " active" : ""),
 				text: shortName(s.name),
 			});
 			tab.title = s.name;
+			tab.setAttribute("tabindex", "0");
+			if (isActive) activeTab = tab;
 			tab.addEventListener("click", () => {
 				this.activeSourceId = s.id;
 				this.renderTabs();
@@ -274,6 +278,8 @@ export class LookupPanel {
 				if (w) void this.lookup(w, false);
 			});
 		}
+		// 查词后 focus 当前激活 tab，方便用户键盘切换
+		activeTab?.focus();
 	}
 
 	toggle(): void {
@@ -292,6 +298,7 @@ export class LookupPanel {
 		// 上限由 CSS max-height 限定；AI 区不再依赖 flex-grow，天然避免折叠
 		this.input.focus();
 		this.input.select();
+		document.addEventListener("keydown", this.escCloseHandler, true);
 	}
 
 	/**
@@ -331,7 +338,8 @@ export class LookupPanel {
 		this.syncTopHeight();
 		// 点击面板外任意处自动关闭（头部收起、内容区外都生效；iframe 内部点击不冒泡到外层）
 		document.addEventListener("mousedown", this.outsideClose, true);
-		await this.lookup(word, true, true);
+		document.addEventListener("keydown", this.escCloseHandler, true);
+		await this.lookup(word, true, true, true);
 	}
 
 	/**
@@ -358,9 +366,10 @@ export class LookupPanel {
 		this.root.style.width = `${w}px`;
 		this.root.style.maxHeight = `${maxH}px`;
 		this.floatClose.addClass("shown");
+		document.addEventListener("keydown", this.escCloseHandler, true);
 		this.syncTopHeight();
 		document.addEventListener("mousedown", this.outsideClose, true);
-		if (word) await this.lookup(word, true, true);
+		if (word) await this.lookup(word, true, true, true);
 	}
 
 	/** 记录打开前的来源焦点（编辑器实例 + 光标 + 活动元素），供关闭时归还 */
@@ -418,6 +427,18 @@ export class LookupPanel {
 		if (!this.root.hasClass("lx-floating")) return;
 		if (t === this.iframe || (t instanceof Element && t.closest?.("iframe"))) return;
 		if (!this.root.contains(t)) this.hide();
+	};
+
+	/** Esc 关闭（capture 阶段：焦点在 CM6 / iframe 时也能先截获，再由 hide() 归还焦点） */
+	private escCloseHandler = (e: KeyboardEvent): void => {
+		if (e.key !== "Escape" || !this.shown) return;
+		// 若焦点在输入框，让输入框自己的 Esc 逻辑先走（清空输入），不要提前 hide
+		const target = e.target as HTMLElement;
+		const inInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+		if (inInput) return;
+		e.preventDefault();
+		e.stopPropagation();
+		this.hide();
 	};
 
 	/**
@@ -535,6 +556,7 @@ export class LookupPanel {
 		this.root.removeClass("lx-floating");
 		this.floatClose.removeClass("shown");
 		document.removeEventListener("mousedown", this.outsideClose, true);
+		document.removeEventListener("keydown", this.escCloseHandler, true);
 		this.root.style.removeProperty("top");
 		this.root.style.removeProperty("left");
 		this.root.style.removeProperty("width");
@@ -611,7 +633,7 @@ export class LookupPanel {
 	 * preferDict=true 时（选中查词入口）强制回到首个词典源，避免默认消耗 AI Token；词典未命中时仍自动兜底 AI。
 	 * 词典未命中时若已启用 AI 则自动兜底解释，保证“查词必有结果”。
 	 */
-	async lookup(word: string, pushHistory = true, preferDict = false): Promise<void> {
+	async lookup(word: string, pushHistory = true, preferDict = false, autoFallback = false): Promise<void> {
 		const w = word.trim();
 		if (!w) return;
 		if (preferDict) {
@@ -656,11 +678,37 @@ export class LookupPanel {
 			this.commitHistory(w, s.id, "", pushHistory);
 			void this.refreshFavState(w);
 			if (this.plugin.settings.vocab.autoAddOnLookup) {
-				void this.plugin.addToDefaultBook(w, res.definition, true);
+				void this.plugin.addToDefaultBook(w, undefined, true);
 			}
 			return;
 		}
-		// 词典未命中：中间区域切换为未命中占位（不残留上一源内容），底部同步提示
+		// 首次查词时自动降级：遍历其余词典源，找到第一个命中的自动切换过去
+		// 手动切 tab / 主动选词典时 autoFallback=false，尊重用户选择
+		if (autoFallback) {
+			for (const alt of this.sources) {
+				if (alt.id === s.id || alt.isAI || alt.isOnline) continue;
+				const altDict = alt.mdict;
+				if (!altDict || !altDict.isLoaded) continue;
+				const altRes = altDict.lookup(w);
+				if (altRes && altRes.definition != null) {
+					this.activeSourceId = alt.id;
+					this.renderTabs();
+					this.currentDoc = altRes.definition;
+					this.setStatusTag(alt.name, altDict.info.wordCount);
+					this.setStatus(`自动切换到 ${shortName(alt.name, 16)}：命中 ${w}`);
+					const doc = this.buildDoc(altRes.definition, altDict, alt.resources);
+					this.renderIframe(doc);
+					this.iframe.classList.remove("hidden");
+					this.commitHistory(w, alt.id, "", pushHistory);
+					void this.refreshFavState(w);
+					if (this.plugin.settings.vocab.autoAddOnLookup) {
+						void this.plugin.addToDefaultBook(w, undefined, true);
+					}
+					return;
+				}
+			}
+		}
+		// 所有词典都未命中：切换为未命中占位
 		this.setStatus(`未命中：${w}（当前词典 ${shortName(s.name, 16)}，可点 AI 释义）`);
 		this.showMiss(w, shortName(s.name, 16));
 		void this.refreshFavState(w);
@@ -1304,7 +1352,7 @@ export class LookupPanel {
 			await this.plugin.removeFromDefaultBook(w);
 			this.setStatus(`已取消收藏：${w}`);
 		} else {
-			await this.plugin.addToDefaultBook(w, this.currentDoc);
+			await this.plugin.addToDefaultBook(w);
 			this.setStatus(`已收藏：${w}`);
 		}
 		await this.refreshFavState(w);

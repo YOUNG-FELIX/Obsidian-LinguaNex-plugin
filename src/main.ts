@@ -138,11 +138,16 @@ export default class LinguaNexPlugin extends Plugin {
 			callback: () => void this.openView(VOCAB_REVIEW_VIEW),
 		});
 		this.addCommand({
-			id: "fav-selection",
-			name: "收藏选中单词",
-			editorCallback: (_editor, _ctx) => {
-				const sel = window.getSelection()?.toString().trim() ?? "";
-				if (sel) void this.favWord(sel, sel);
+			id: "fav-toggle",
+			name: "收藏/取消收藏（当前词）",
+			callback: () => {
+				const p = this.panel;
+				if (p?.visible) {
+					void p.favCurrent();
+				} else {
+					const sel = window.getSelection()?.toString().trim() ?? "";
+					if (sel) void this.favWord(sel, sel);
+				}
 			},
 		});
 
@@ -153,17 +158,7 @@ export default class LinguaNexPlugin extends Plugin {
 			makeVocabReviewView(leaf, this),
 		);
 
-		this.registerDomEvent(document, "keydown", (e) => {
-			const closeKey = this.settings.lookup.closeKey || "Escape";
-			if (
-				this.settings.lookup.closeOnEsc &&
-				e.key === closeKey &&
-				this.panel?.visible
-			) {
-				this.panel.hide();
-			}
-		});
-
+		// Esc 关闭已迁移到 LookupPanel（capture 阶段，焦点在 CM6/iframe 也生效）
 		this.addSettingTab(new LinguaNexSettingTab(this.app, this));
 
 		// 选中功能条：抽屉保持懒创建；功能条启动 5s 后再创建实例并注册选区监听，
@@ -611,25 +606,13 @@ export default class LinguaNexPlugin extends Plugin {
 		const book = this.settings.vocab.defaultBook;
 		const books = await this.vocab.books();
 		if (!books.includes(book)) await this.vocab.createBook(book);
-		// 词性补全：本地词典优先，其次收藏传入的定义（清理 HTML 后截断）
-		let def = (definition ?? "").trim();
-		if (!def) {
-			def = this.lookupDef(word, 300);
-		} else {
-			def = def
-				.replace(/<[^>]+>/g, " ")
-				.replace(/sound:\/\/\S+/gi, "")
-				.replace(/\s+/g, " ")
-				.trim()
-				.slice(0, 300);
-		}
+		// definition 不再写入词典原文 HTML —— 生词本只存单词 + 复习状态，复习时按词重新查词典
 		const ctx = context
 			? context.replace(/\s+/g, " ").trim().slice(0, 80)
 			: undefined;
 		await this.vocab.add(book, {
 			word,
 			dictId: "__manual__",
-			definition: def || undefined,
 			addedAt: Date.now(),
 			reviewCount: 0,
 			context: ctx,
