@@ -304,7 +304,13 @@ export class VocabReviewView extends ItemView {
 		this.render();
 	}
 
-	async onClose(): Promise<void> {}
+	async onClose(): Promise<void> {
+		this.heatmapPopover?.remove();
+		this.heatmapPopover = null;
+	}
+
+	/** 热力图日期面板挂在 body 上，重绘/关闭视图时一并移除，避免节点残留 */
+	private heatmapPopover: HTMLElement | null = null;
 
 	private mode: "list" | "deck" | "plan" = "list";
 	/** plan 之前的模式：点「复习数据」后切回时恢复 */
@@ -756,10 +762,12 @@ export class VocabReviewView extends ItemView {
 		// 月历格（6 行 × 7 列 = 42 格）
 		const grid = wrap.createDiv({ cls: "lx-hm-grid" });
 
+		this.heatmapPopover?.remove();
 		const popover = document.createElement("div");
 		popover.addClass("lx-hm-popover");
 		popover.style.display = "none";
 		document.body.appendChild(popover);
+		this.heatmapPopover = popover;
 		const closePopover = (): void => {
 			popover.style.display = "none";
 			popover.empty();

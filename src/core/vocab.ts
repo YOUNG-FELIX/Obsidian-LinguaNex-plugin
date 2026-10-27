@@ -161,74 +161,11 @@ export class VocabStore {
 		return `${this.baseDir}/vocab/${safe}.json`;
 	}
 
-	private legacyLogPath(): string {
-		return `${this.baseDir}/vocab/_review-log.json`;
-	}
-
-	/** 迁移进行中标记：避免 save() -> ensureBase() -> migrate 的递归 */
-	private migrating = false;
-
 	async ensureBase(): Promise<void> {
 		const dir = `${this.baseDir}/vocab`;
 		if (!(await this.vault.adapter.exists(dir))) {
 			await this.vault.adapter.mkdir(dir);
 		}
-		await this.migrateLegacyLog();
-	}
-
-	/** 把旧版独立日志合并进各词条 hist，然后删除该文件，历史复习数据不丢 */
-	private async migrateLegacyLog(): Promise<void> {
-		if (this.migrating) return;
-		this.migrating = true;
-		try {
-			const p = this.legacyLogPath();
-			if (!(await this.vault.adapter.exists(p))) return;
-			await this.doMigrateLegacyLog(p);
-		} finally {
-			this.migrating = false;
-		}
-	}
-
-	private async doMigrateLegacyLog(p: string): Promise<void> {
-		let rows: {
-			word: string;
-			book: string;
-			rating: 0 | 1 | 2;
-			at: number;
-			proficiencyAfter?: number;
-		}[] = [];
-		try {
-			rows = JSON.parse((await this.vault.adapter.read(p)) || "[]");
-		} catch {
-			rows = [];
-		}
-		const byBook = new Map<string, Map<string, ReviewPoint[]>>();
-		for (const r of rows) {
-			if (!r?.word || !r?.book || r.at === undefined) continue;
-			const key = r.word.toLowerCase();
-			const map = byBook.get(r.book) ?? new Map<string, ReviewPoint[]>();
-			const pts = map.get(key) ?? [];
-			pts.push([DAY_KEY.format(new Date(r.at)), r.rating, Math.round(r.proficiencyAfter ?? 0)]);
-			map.set(key, pts);
-			byBook.set(r.book, map);
-		}
-		for (const [bookName, map] of byBook) {
-			const list = await this.entries(bookName);
-			let changed = false;
-			for (const e of list) {
-				const pts = map.get(e.word.toLowerCase());
-				if (!pts?.length) continue;
-				const hist = [...(e.hist ?? []), ...pts].sort((a, b) =>
-					a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
-				);
-				// 归一化：已被递归写膨胀的历史在这里压缩回「每天最多 3 条」
-				e.hist = capHist(hist);
-				changed = true;
-			}
-			// 直接写盘，不再经过 save()，避免再次触发 ensureBase 造成递归
-			if (changed) await this.vault.adapter.write(this.bookPath(bookName), JSON.stringify(list, null, 2));
-		}
-		await this.vault.adapter.remove(p);
 	}
 
 	async books(): Promise<string[]> {
@@ -241,7 +178,7 @@ export class VocabStore {
 				const seg = f.split("/").filter(Boolean);
 				return (seg[seg.length - 1] ?? "").replace(/\.json$/i, "");
 			})
-			.filter((name) => name !== "" && !name.startsWith("_"));
+			.filter((name) => name !== "");
 	}
 
 	async createBook(name: string): Promise<boolean> {
