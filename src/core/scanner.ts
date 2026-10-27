@@ -1,4 +1,4 @@
-import { Vault } from "obsidian";
+import { Vault, TFile, TFolder } from "obsidian";
 
 const MDX_MAGIC = [0x00, 0x00, 0x03, 0x7c];
 const MDD_MAGIC = [0x00, 0x00, 0x03, 0x84];
@@ -38,6 +38,44 @@ export async function scanDir(vault: Vault, dir: string): Promise<ScanResult[]> 
 		});
 		const r = await inspectMdx(vault, f);
 		results.push({ mdxPath: f, mddPath, resourceFiles, ...r });
+	}
+	return results;
+}
+
+/** 递归扫描目录下所有层级的 mdx（走 Obsidian 内存文件树，零文件系统 I/O） */
+export async function scanDirRecursive(
+	vault: Vault,
+	rootDir: string,
+): Promise<ScanResult[]> {
+	const root = vault.getAbstractFileByPath(rootDir);
+	if (!root || !(root instanceof TFolder)) return [];
+	const mdxList: { mdx: string; mdd: string | null; res: string[] }[] = [];
+	const walk = (folder: TFolder): void => {
+		const files = folder.children
+			.filter((c): c is TFile => c instanceof TFile)
+			.map((c) => c.path);
+		for (const f of files) {
+			if (!f.toLowerCase().endsWith(".mdx")) continue;
+			const stem = f.toLowerCase().slice(0, -4);
+			const mdd = files.find((x) => x.toLowerCase() === stem + ".mdd") ?? null;
+			const res = files.filter((x) =>
+				RESOURCE_EXTS.includes(x.toLowerCase().split(".").pop() ?? ""),
+			);
+			mdxList.push({ mdx: f, mdd, res });
+		}
+		for (const c of folder.children) {
+			if (c instanceof TFolder) walk(c);
+		}
+	};
+	walk(root);
+	const results: ScanResult[] = [];
+	for (const { mdx, mdd, res } of mdxList) {
+		results.push({
+			mdxPath: mdx,
+			mddPath: mdd,
+			resourceFiles: res,
+			...(await inspectMdx(vault, mdx)),
+		});
 	}
 	return results;
 }
