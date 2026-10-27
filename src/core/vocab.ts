@@ -16,8 +16,8 @@ export interface DailyStats {
 /** 单次复习记录：[日期 YYYY-MM-DD, 评级 0忘记/1模糊/2认识, 当次熟练度] */
 export type ReviewPoint = [string, 0 | 1 | 2, number];
 
-/** 生词本在 vault 内的固定存放目录（相对仓库根） */
-export const VOCAB_ROOT = "ObsidianFelix/linguanex";
+/** 生词本存放目录（相对库根，不含库名，任何库名通用）：<vault>/linguanex/vocab */
+export const VOCAB_ROOT = "linguanex";
 
 export interface VocabEntry {
 	word: string;
