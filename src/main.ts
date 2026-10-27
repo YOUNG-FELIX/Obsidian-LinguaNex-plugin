@@ -14,7 +14,7 @@ import {
 	type OnlineSourceConfig,
 } from "./settings";
 import { LinguaNexMdict } from "./core/mdict";
-import { scanDir, scanDirRecursive, type ScanResult } from "./core/scanner";
+import { scanDir, type ScanResult } from "./core/scanner";
 import { DictResources } from "./core/resources";
 import { VocabStore, VOCAB_ROOT } from "./core/vocab";
 import { EudicService } from "./core/eudic";
@@ -152,6 +152,21 @@ export default class LinguaNexPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "pronounce-current",
+			name: "发音（当前词）",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "P" }],
+			callback: () => {
+				const p = this.panel;
+				if (p?.visible) {
+					void p.speakCurrent();
+				} else {
+					const sel = window.getSelection()?.toString().trim() ?? "";
+					if (sel) void this.speakWord(sel);
+				}
+			},
+		});
+
 		this.registerView(DICT_MANAGER_VIEW, (leaf) =>
 			makeDictManagerView(leaf, this),
 		);
@@ -171,8 +186,8 @@ export default class LinguaNexPlugin extends Plugin {
 			});
 		}, 5000);
 
-		// 启动时自动扫描库根 linguanex/ 并加载已启用词典（静默，不弹通知）
-		void this.scanAndRefresh(true);
+		// 启动时自动加载已启用词典
+		void this.reloadDictionaries();
 	}
 
 	onunload(): void {
@@ -271,21 +286,15 @@ export default class LinguaNexPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	/** 扫描词典目录并合并到配置，随后重载 */
-	async scanAndRefresh(silent = false): Promise<void> {
+	/** 扫描已添加的词典目录并合并到配置，随后重载 */
+	async scanAndRefresh(): Promise<void> {
 		const results: ScanResult[] = [];
-		// 1. 优先：库根 linguanex/ 递归自动发现（不限层级，放哪儿都行）
-		results.push(...(await scanDirRecursive(this.app.vault, VOCAB_ROOT)));
-		// 2. 备选：用户手动添加的 vault 目录（OB 缓存）
 		for (const dir of this.settings.dictDirs) {
 			results.push(...(await scanDir(this.app.vault, dir)));
 		}
-		// 同 path 去重，保留首个（即 linguanex/ 优先）
-		const seen = new Set<string>();
 		const merged: DictItem[] = [];
 		for (const r of results) {
-			if (!r.valid || seen.has(r.mdxPath)) continue;
-			seen.add(r.mdxPath);
+			if (!r.valid) continue;
 			const existing = this.settings.dictionaries.find(
 				(d) => d.path === r.mdxPath,
 			);
@@ -306,7 +315,6 @@ export default class LinguaNexPlugin extends Plugin {
 		this.settings.dictionaries = merged;
 		await this.saveSettings();
 		await this.reloadDictionaries();
-		if (silent) return;
 		if (!merged.length) {
 			new Notice("LinguaNex：目录中未发现有效 .mdx 词典");
 		} else {

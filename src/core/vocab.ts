@@ -197,9 +197,14 @@ export class VocabStore {
 	}
 
 	async books(): Promise<string[]> {
-		await this.ensureBase();
 		const dir = `${this.baseDir}/vocab`;
-		const listed = await this.vault.adapter.list(dir);
+		let listed: { files: string[] };
+		try {
+			listed = await this.vault.adapter.list(dir);
+		} catch {
+			// 目录尚未创建时直接返回空列表，不在这里建目录
+			return [];
+		}
 		return listed.files
 			.filter((f) => f.toLowerCase().endsWith(".json"))
 			.map((f) => {
@@ -249,6 +254,8 @@ export class VocabStore {
 	}
 
 	async add(book: string, entry: VocabEntry): Promise<void> {
+		// 添加生词时才确保目录存在（插件启用时未建目录的场景在此补齐）
+		await this.ensureBase();
 		const list = await this.entries(book);
 		const idx = list.findIndex((e) => e.word.toLowerCase() === entry.word.toLowerCase());
 		if (idx >= 0) {
@@ -322,7 +329,6 @@ export class VocabStore {
 
 	/** 聚合某本生词本某月的复习统计；同词同日多次最多计 3 次 */
 	async getDailyStats(book: string, year: number, month: number): Promise<Map<string, DailyStats>> {
-		await this.ensureBase();
 		const list = await this.entries(book);
 		const daily = new Map<string, DailyStats>();
 		const prefix = `${year}-${String(month + 1).padStart(2, "0")}-`;

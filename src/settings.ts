@@ -238,7 +238,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("添加词典目录")
-			.setDesc("放在库根 linguanex/ 下的词典会自动递归发现（不限层级）；此处可额外搜索 vault 内其他文件夹作为补充。添加后自动扫描其中的 .mdx 词典。词典启用/移除见下方「已发现词典」。")
+			.setDesc("输入关键字搜索 vault 内文件夹，有匹配项才显示补全列表；添加后自动扫描其中的 .mdx 词典。词典启用/移除见下方「已发现词典」。")
 			.addText((text) => {
 				text.setPlaceholder("搜索文件夹…");
 				let timer: number | undefined;
