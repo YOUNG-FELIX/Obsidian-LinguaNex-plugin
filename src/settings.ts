@@ -1,4 +1,4 @@
-import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import type LinguaNexPlugin from "./main";
 import type { AIConfig } from "./core/ai";
 import { DEFAULT_PROMPT } from "./core/ai";
@@ -241,10 +241,13 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 			.setDesc("输入关键字搜索 vault 内文件夹，有匹配项才显示补全列表；添加后自动扫描其中的 .mdx 词典。词典启用/移除见下方「已发现词典」。")
 			.addText((text) => {
 				text.setPlaceholder("搜索文件夹…");
+				let timer: number | undefined;
 				text.inputEl.addEventListener("input", () => {
-					void this.renderDirSuggest(text.inputEl, suggestEl);
+					window.clearTimeout(timer);
+					timer = window.setTimeout(() => this.renderDirSuggest(text.inputEl, suggestEl), 120);
 				});
 				text.inputEl.addEventListener("blur", () => {
+					window.clearTimeout(timer);
 					window.setTimeout(() => suggestEl.empty(), 180);
 				});
 			});
@@ -1077,35 +1080,29 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	}
 
 	/** 递归列出 vault 内全部文件夹（相对路径，根目录为 ""） */
-	private async listAllFolders(): Promise<string[]> {
+	private listAllFolders(): string[] {
+		// 直接走 Obsidian 内存文件树（getRoot().children），不发起任何文件系统 I/O，毫秒级返回。
 		const out: string[] = [];
-		const stack = [""];
-		while (stack.length) {
-			const cur = stack.pop()!;
-			try {
-				const res = await this.app.vault.adapter.list(cur);
-				for (const f of res.folders) {
-					out.push(f);
-					stack.push(f);
+		const walk = (folder: TFolder): void => {
+			for (const child of folder.children) {
+				if (child instanceof TFolder) {
+					out.push(child.path);
+					walk(child);
 				}
-			} catch (e) {
-				// 忽略不可读目录
 			}
-		}
+		};
+		walk(this.app.vault.getRoot());
 		return out;
 	}
 
 	/** 渲染词典目录搜索补全 */
-	private async renderDirSuggest(
-		input: HTMLInputElement,
-		box: HTMLElement,
-	): Promise<void> {
+	private renderDirSuggest(input: HTMLInputElement, box: HTMLElement): void {
 		const kw = input.value.trim().toLowerCase();
 		if (!kw) {
 			box.empty();
 			return;
 		}
-		const folders = await this.listAllFolders();
+		const folders = this.listAllFolders();
 		if (document.activeElement !== input) {
 			box.empty();
 			return;
