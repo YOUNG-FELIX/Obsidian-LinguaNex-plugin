@@ -56,6 +56,22 @@ export const DEFAULT_REVIEW: ReviewConfig = {
 	planDays: 30,
 };
 
+/** 同一天最多保留 3 条（热力图本就按 3 条封顶，多余记录无意义，也避免历史无限膨胀） */
+function capHist(hist: ReviewPoint[]): ReviewPoint[] {
+	const perDay = new Map<string, number>();
+	const kept: ReviewPoint[] = [];
+	for (const pt of hist) {
+		const n = (perDay.get(pt[0]) ?? 0) + 1;
+		perDay.set(pt[0], n);
+		if (n <= 3) kept.push(pt);
+	}
+	return kept;
+}
+
+function appendPoint(hist: ReviewPoint[] | undefined, point: ReviewPoint): ReviewPoint[] {
+	return capHist([...(hist ?? []), point]);
+}
+
 const DAY_KEY = new Intl.DateTimeFormat("en-CA", {
 	year: "numeric",
 	month: "2-digit",
@@ -110,7 +126,11 @@ export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<Revi
 				: c.intervalKnown;
 	next.nextReview = now + next.interval * 24 * 60 * 60 * 1000;
 	// 复习记录直接挂在词条上：日期、评级、当次熟练度
-	next.hist = [...(e.hist ?? []), [DAY_KEY.format(new Date(now)), rating, Math.round(next.proficiency)]];
+	next.hist = appendPoint(e.hist, [
+		DAY_KEY.format(new Date(now)),
+		rating,
+		Math.round(next.proficiency),
+	]);
 	return next;
 }
 
@@ -145,6 +165,9 @@ export class VocabStore {
 		return `${this.baseDir}/vocab/_review-log.json`;
 	}
 
+	/** 迁移进行中标记：避免 save() -> ensureBase() -> migrate 的递归 */
+	private migrating = false;
+
 	async ensureBase(): Promise<void> {
 		const dir = `${this.baseDir}/vocab`;
 		if (!(await this.vault.adapter.exists(dir))) {
@@ -155,8 +178,18 @@ export class VocabStore {
 
 	/** 把旧版独立日志合并进各词条 hist，然后删除该文件，历史复习数据不丢 */
 	private async migrateLegacyLog(): Promise<void> {
-		const p = this.legacyLogPath();
-		if (!(await this.vault.adapter.exists(p))) return;
+		if (this.migrating) return;
+		this.migrating = true;
+		try {
+			const p = this.legacyLogPath();
+			if (!(await this.vault.adapter.exists(p))) return;
+			await this.doMigrateLegacyLog(p);
+		} finally {
+			this.migrating = false;
+		}
+	}
+
+	private async doMigrateLegacyLog(p: string): Promise<void> {
 		let rows: {
 			word: string;
 			book: string;
@@ -185,12 +218,15 @@ export class VocabStore {
 			for (const e of list) {
 				const pts = map.get(e.word.toLowerCase());
 				if (!pts?.length) continue;
-				e.hist = [...(e.hist ?? []), ...pts].sort((a, b) =>
+				const hist = [...(e.hist ?? []), ...pts].sort((a, b) =>
 					a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
 				);
+				// 归一化：已被递归写膨胀的历史在这里压缩回「每天最多 3 条」
+				e.hist = capHist(hist);
 				changed = true;
 			}
-			if (changed) await this.save(bookName, list);
+			// 直接写盘，不再经过 save()，避免再次触发 ensureBase 造成递归
+			if (changed) await this.vault.adapter.write(this.bookPath(bookName), JSON.stringify(list, null, 2));
 		}
 		await this.vault.adapter.remove(p);
 	}
