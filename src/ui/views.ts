@@ -467,7 +467,6 @@ export class VocabReviewView extends ItemView {
 				btn.addEventListener("click", async () => {
 					const updated = applyRating(e, g, this.reviewCfg);
 					await this.plugin.vocab.update(book, e.word, updated);
-					void this.plugin.vocab.logReview(e.word, book, g, updated.proficiency ?? 0, updated.interval ?? 1);
 					// 评级后自动展开释义，方便核对；不重绘、不移位，保留当前行位置
 					open = true;
 					defHost.addClass("open");
@@ -608,13 +607,6 @@ export class VocabReviewView extends ItemView {
 			// 第二阶段：以本次点击的评级为准写入复习数据，然后直接下一词
 			const updated = applyRating(e, g, this.reviewCfg);
 			await this.plugin.vocab.update(book, e.word, updated);
-			void this.plugin.vocab.logReview(
-				e.word,
-				book,
-				g,
-				updated.proficiency ?? 0,
-				updated.interval ?? 1
-			);
 			if (g === 0) deck.push({ ...updated }); // 忘记：本轮末尾再复习一次
 			resetPick();
 			idx += 1;
@@ -780,7 +772,7 @@ export class VocabReviewView extends ItemView {
 		const render = async (): Promise<void> => {
 			monthLabel.setText(`${year} 年 ${month + 1} 月`);
 			grid.empty();
-			const daily = await this.plugin.vocab.getDailyStats(year, month);
+			const daily = await this.plugin.vocab.getDailyStats(book, year, month);
 			// 找最大 count 来定 4 档阈值
 			let maxCount = 0;
 			daily.forEach((s) => { if (s.count > maxCount) maxCount = s.count; });

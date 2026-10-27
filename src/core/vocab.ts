@@ -1,14 +1,5 @@
 import { Vault } from "obsidian";
 
-export interface ReviewLogEntry {
-	word: string;
-	book: string;
-	rating: 0 | 1 | 2;
-	at: number;
-	proficiencyAfter: number;
-	intervalAfter: number;
-}
-
 export interface DailyStats {
 	date: string;
 	count: number;       // 同词同日最多 3 次后的实际计入次数
@@ -21,6 +12,9 @@ export interface DailyStats {
 	wordCountMap: Map<string, number>;
 	words: string[];     // 当日去重词条（首次出现顺序）
 }
+
+/** 单次复习记录：[日期 YYYY-MM-DD, 评级 0忘记/1模糊/2认识, 当次熟练度] */
+export type ReviewPoint = [string, 0 | 1 | 2, number];
 
 export interface VocabEntry {
 	word: string;
@@ -36,6 +30,8 @@ export interface VocabEntry {
 	easeFactor?: number;
 	lastReviewed?: number;
 	nextReview?: number;
+	/** 逐次复习记录，热力图数据源；随词条一起存储，不再单独维护日志文件 */
+	hist?: ReviewPoint[];
 }
 
 export interface ReviewConfig {
@@ -59,6 +55,12 @@ export const DEFAULT_REVIEW: ReviewConfig = {
 	goodStreak: 3,
 	planDays: 30,
 };
+
+const DAY_KEY = new Intl.DateTimeFormat("en-CA", {
+	year: "numeric",
+	month: "2-digit",
+	day: "2-digit",
+});
 
 export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<ReviewConfig>): VocabEntry {
 	const c: ReviewConfig = { ...DEFAULT_REVIEW, ...(cfg ?? {}) };
@@ -107,6 +109,8 @@ export function applyRating(e: VocabEntry, rating: 0 | 1 | 2, cfg?: Partial<Revi
 				? c.intervalFamiliar
 				: c.intervalKnown;
 	next.nextReview = now + next.interval * 24 * 60 * 60 * 1000;
+	// 复习记录直接挂在词条上：日期、评级、当次熟练度
+	next.hist = [...(e.hist ?? []), [DAY_KEY.format(new Date(now)), rating, Math.round(next.proficiency)]];
 	return next;
 }
 
@@ -127,10 +131,6 @@ export interface ScheduleGroup {
 }
 
 export class VocabStore {
-	private static readonly DATE_FMT = new Intl.DateTimeFormat("en-CA", {
-		year: "numeric", month: "2-digit", day: "2-digit",
-	});
-
 	constructor(
 		private vault: Vault,
 		private baseDir: string,
@@ -141,7 +141,7 @@ export class VocabStore {
 		return `${this.baseDir}/vocab/${safe}.json`;
 	}
 
-	private logPath(): string {
+	private legacyLogPath(): string {
 		return `${this.baseDir}/vocab/_review-log.json`;
 	}
 
@@ -150,6 +150,49 @@ export class VocabStore {
 		if (!(await this.vault.adapter.exists(dir))) {
 			await this.vault.adapter.mkdir(dir);
 		}
+		await this.migrateLegacyLog();
+	}
+
+	/** 把旧版独立日志合并进各词条 hist，然后删除该文件，历史复习数据不丢 */
+	private async migrateLegacyLog(): Promise<void> {
+		const p = this.legacyLogPath();
+		if (!(await this.vault.adapter.exists(p))) return;
+		let rows: {
+			word: string;
+			book: string;
+			rating: 0 | 1 | 2;
+			at: number;
+			proficiencyAfter?: number;
+		}[] = [];
+		try {
+			rows = JSON.parse((await this.vault.adapter.read(p)) || "[]");
+		} catch {
+			rows = [];
+		}
+		const byBook = new Map<string, Map<string, ReviewPoint[]>>();
+		for (const r of rows) {
+			if (!r?.word || !r?.book || r.at === undefined) continue;
+			const key = r.word.toLowerCase();
+			const map = byBook.get(r.book) ?? new Map<string, ReviewPoint[]>();
+			const pts = map.get(key) ?? [];
+			pts.push([DAY_KEY.format(new Date(r.at)), r.rating, Math.round(r.proficiencyAfter ?? 0)]);
+			map.set(key, pts);
+			byBook.set(r.book, map);
+		}
+		for (const [bookName, map] of byBook) {
+			const list = await this.entries(bookName);
+			let changed = false;
+			for (const e of list) {
+				const pts = map.get(e.word.toLowerCase());
+				if (!pts?.length) continue;
+				e.hist = [...(e.hist ?? []), ...pts].sort((a, b) =>
+					a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
+				);
+				changed = true;
+			}
+			if (changed) await this.save(bookName, list);
+		}
+		await this.vault.adapter.remove(p);
 	}
 
 	async books(): Promise<string[]> {
@@ -161,7 +204,8 @@ export class VocabStore {
 			.map((f) => {
 				const seg = f.split("/").filter(Boolean);
 				return (seg[seg.length - 1] ?? "").replace(/\.json$/i, "");
-			});
+			})
+			.filter((name) => name !== "" && !name.startsWith("_"));
 	}
 
 	async createBook(name: string): Promise<boolean> {
@@ -273,84 +317,45 @@ export class VocabStore {
 		return sorted;
 	}
 
-	// ===== Review Log（热力图数据源）=====
+	// ===== 热力图数据源：词条 hist =====
 
-	async logReview(
-		word: string,
-		book: string,
-		rating: 0 | 1 | 2,
-		proficiencyAfter: number,
-		intervalAfter: number,
-	): Promise<void> {
+	/** 聚合某本生词本某月的复习统计；同词同日多次最多计 3 次 */
+	async getDailyStats(book: string, year: number, month: number): Promise<Map<string, DailyStats>> {
 		await this.ensureBase();
-		let entries: ReviewLogEntry[] = [];
-		try {
-			if (await this.vault.adapter.exists(this.logPath())) {
-				const raw = await this.vault.adapter.read(this.logPath());
-				entries = JSON.parse(raw || "[]");
-			}
-		} catch {
-			entries = [];
-		}
-		entries.push({
-			word, book, rating,
-			at: Date.now(),
-			proficiencyAfter, intervalAfter,
-		});
-		if (entries.length > 200_000) entries = entries.slice(-200_000);
-		await this.vault.adapter.write(this.logPath(), JSON.stringify(entries));
-	}
-
-	private async readLog(): Promise<ReviewLogEntry[]> {
-		try {
-			if (!(await this.vault.adapter.exists(this.logPath()))) return [];
-			const raw = await this.vault.adapter.read(this.logPath());
-			return JSON.parse(raw || "[]");
-		} catch {
-			return [];
-		}
-	}
-
-	private dateKey(d: Date): string {
-		return VocabStore.DATE_FMT.format(d);
-	}
-
-	/** 聚合某月复习统计；同词同日多次最多计 3 次 */
-	async getDailyStats(year: number, month: number): Promise<Map<string, DailyStats>> {
-		const entries = await this.readLog();
+		const list = await this.entries(book);
 		const daily = new Map<string, DailyStats>();
+		const prefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
 		const MAX = 3;
-		for (const e of entries) {
-			const d = new Date(e.at);
-			if (d.getFullYear() !== year || d.getMonth() !== month) continue;
-			const key = this.dateKey(d);
-			let s = daily.get(key);
-			if (!s) {
-				s = {
-					date: key,
-					count: 0,
-					forgot: 0,
-					fuzzy: 0,
-					known: 0,
-					proficiencySum: 0,
-					proficiencyCount: 0,
-					uniqueWords: new Set(),
-					wordCountMap: new Map(),
-					words: [],
-				};
-				daily.set(key, s);
-			}
-			const prev = s.wordCountMap.get(e.word) ?? 0;
-			if (prev < MAX) {
-				s.wordCountMap.set(e.word, prev + 1);
-				s.count += 1;
-				s.uniqueWords.add(e.word);
-				if (prev === 0) s.words.push(e.word);
-				if (e.rating === 0) s.forgot += 1;
-				else if (e.rating === 1) s.fuzzy += 1;
-				else s.known += 1;
-				s.proficiencySum += e.proficiencyAfter;
-				s.proficiencyCount += 1;
+		for (const e of list) {
+			for (const [day, rating, prof] of e.hist ?? []) {
+				if (!day.startsWith(prefix)) continue;
+				let st = daily.get(day);
+				if (!st) {
+					st = {
+						date: day,
+						count: 0,
+						forgot: 0,
+						fuzzy: 0,
+						known: 0,
+						proficiencySum: 0,
+						proficiencyCount: 0,
+						uniqueWords: new Set(),
+						wordCountMap: new Map(),
+						words: [],
+					};
+					daily.set(day, st);
+				}
+				const prev = st.wordCountMap.get(e.word) ?? 0;
+				if (prev >= MAX) continue;
+				st.wordCountMap.set(e.word, prev + 1);
+				st.count += 1;
+				st.uniqueWords.add(e.word);
+				if (prev === 0) st.words.push(e.word);
+				if (rating === 0) st.forgot += 1;
+				else if (rating === 1) st.fuzzy += 1;
+				else st.known += 1;
+				st.proficiencySum += prof;
+				st.proficiencyCount += 1;
 			}
 		}
 		return daily;
