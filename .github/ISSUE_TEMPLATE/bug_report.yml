@@ -1,0 +1,98 @@
+name: Bug 反馈
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先升级到最新版本确认问题仍然存在。
+        **请勿在 Issue 中粘贴 API Key、欧路 Token 或任何密钥。**
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      description: 设置 → 第三方插件 → LinguaNex 显示的版本号
+      placeholder: "0.11.1"
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian 版本
+      placeholder: "1.8.7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iOS / iPadOS
+        - Android
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 出问题的模块
+      options:
+        - 查词面板 / 悬浮窗
+        - 选中取词工具条
+        - 生词本 / 复习
+        - 学习热力图
+        - 发音
+        - 在线词典 / 翻译
+        - AI 释义
+        - PDF 查词
+        - 欧路同步
+        - 设置页
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开 Obsidian 开始，一步一步写
+      placeholder: |
+        1. 设置里启用词典 A
+        2. 在笔记中选中单词 xxx
+        3. 点工具条的「查词」
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 控制台日志
+      description: 桌面端 Ctrl/Cmd + Shift + I → Console，把报错贴在这里
+      render: shell
+
+  - type: textarea
+    id: dict-info
+    attributes:
+      label: 词典信息（如涉及查词问题）
+      description: 用的是哪一个 .mdx、来自哪一家；是否带 .mdd

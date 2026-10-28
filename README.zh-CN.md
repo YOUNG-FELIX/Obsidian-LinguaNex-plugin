@@ -127,7 +127,11 @@ npm run build   # 类型检查 + 生产打包
 
 ## 贡献
 
-欢迎提交 Issue 与 Pull Request。请注明 Obsidian 版本、操作系统与复现步骤；提交 PR 前请先运行 `npm run build`。
+欢迎提交 Issue 与 Pull Request。开始前请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+- 提 Bug / 需求：请使用 Issue 模板，注明 Obsidian 版本、操作系统与复现步骤
+- 发 PR：提交前请先运行 `npm run build`
+- 报安全漏洞：请走 [SECURITY.md](SECURITY.md) 里的私有公告，**不要开公开 Issue**
 
 ## 许可证
 

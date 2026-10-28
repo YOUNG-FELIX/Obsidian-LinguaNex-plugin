@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 文档与常见问题
+    url: https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin#readme
+    about: 安装、快速上手、设置项说明与常见问题，请先查看。
+  - name: 📝 更新日志
+    url: https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/blob/main/CHANGELOG.md
+    about: 确认你遇到的问题是否已在最新版本修复。
+  - name: 🔐 报告安全漏洞
+    url: https://github.com/YOUNG-FELIX/Obsidian-LinguaNex-plugin/security/advisories/new
+    about: 安全漏洞请走私有公告，不要开公开 Issue。

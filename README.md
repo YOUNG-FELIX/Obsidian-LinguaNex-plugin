@@ -81,7 +81,8 @@ All commands can be rebound in **Settings → Hotkeys**.
 - Vocabulary books: `<vault>/linguanex/vocab/<book>.json` (vault-relative, so any vault name works).
 - The folder is created once when the plugin is enabled; if it is later removed, it is recreated when you next add a word.
 - Review history lives in each entry's `hist` field as `[date, rating, proficiency]`; there is no separate log file.
-- Because data lives inside the vault, it syncs with Obsidian Sync / Git like normal notes. Back up the json to keep your history.
+- Per-word notes live in each entry's `note` field and are only saved for favourited (in-book) words.
+- Because data lives inside the vault, it syncs with Obsidian Sync / Git like normal notes. Back up the json to keep your history and notes.
 
 ## Settings overview
 
@@ -92,8 +93,10 @@ All commands can be rebound in **Settings → Hotkeys**.
 | Sentence translation | Translation engine and credentials. |
 | Pronunciation | Local `.mdd` audio, Youdao, Free Dictionary, TTS, accent variant. |
 | PDF lookup | Enable PDF selection lookup and context menu. |
-| AI explanations | Provider, base URL, model, API key, prompt, ratio. |
+| AI explanations | Provider (built-in + custom presets), base URL, model (fetch list in one click), API key, prompt, ratio. |
 | Vocabulary | Default book, review algorithm parameters, new-word limits. |
+| Eudic sync | Token, language, category, sync mode. |
+| Privacy & security | Persist-secrets switch: when off, the AI API key and Eudic token stay in memory only and are never written to `data.json`. |
 | Eudic sync | Token, language, category, sync mode. |
 
 ## Development
@@ -120,10 +123,16 @@ npm run build   # type check + production bundle
 - **No dictionaries found** — confirm the folder was added in settings and contains `.mdx` files; the scan is not recursive into folders you did not add.
 - **Lookup misses a word** — try another dictionary tab, or check that the dictionary is enabled and ordered above others.
 - **No audio** — enable the pronunciation sources you want; `.mdd` audio is used first, then online audio, then TTS.
+- **No AI option after enabling AI** — since v0.11.0 the switch rebuilds the source list and refreshes open panels immediately, no restart needed. If it is still missing, check that the base URL and API key are filled in.
+- **Cannot save a note** — notes are only saved for favourited words; you will be asked to favourite the word first and nothing is written.
 
 ## Contributing
 
-Issues and pull requests are welcome. Please include your Obsidian version, platform and steps to reproduce. Run `npm run build` before opening a PR.
+Issues and pull requests are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+- Bug reports and feature requests: use the issue templates, and include your Obsidian version, OS and reproduction steps
+- Pull requests: run `npm run build` before opening one
+- Security issues: follow [SECURITY.md](SECURITY.md) and report privately — do **not** open a public issue
 
 ## License
 
