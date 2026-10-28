@@ -5,7 +5,7 @@ import process from "process";
 (globalThis as unknown as Record<string, unknown>).Buffer = Buffer;
 (globalThis as unknown as Record<string, unknown>).process = process;
 
-import { Notice, Plugin } from "obsidian";
+import { Plugin } from "obsidian";
 import {
 	DEFAULT_SETTINGS,
 	LinguaNexSettings,
@@ -30,6 +30,7 @@ import {
 import { extractSoundPath, playAudioUrl, playMddAudio, speakTTS } from "./core/audio";
 import { YoudaoAPI, FreeDictAPI, buildOnlineDoc } from "./core/onlineDict";
 import { translateSentence, buildTranslateDoc } from "./core/translate";
+import { ToastManager } from "./core/notice";
 
 export const YOUDao_SOURCE_ID = "__youdao__";
 export const FREE_DICT_SOURCE_ID = "__free_dict__";
@@ -37,6 +38,8 @@ export const TRANSLATE_SOURCE_ID = "__translate__";
 
 export default class LinguaNexPlugin extends Plugin {
 	declare settings: LinguaNexSettings;
+	/** 全局 toast 管理：统一时长与去重，卸载时一并收起，杜绝提示长期驻留 */
+	readonly toast = new ToastManager();
 	vocab: VocabStore;
 	readonly youdao = new YoudaoAPI();
 	readonly freeDict = new FreeDictAPI();
@@ -62,11 +65,50 @@ export default class LinguaNexPlugin extends Plugin {
 	/** 选中取词工具条懒创建：同样避免启动时挂载 DOM，首次选中文本时才创建 */
 	private fbar: FeatureBar | null = null;
 	private ensureFbar(): FeatureBar {
-		if (!this.fbar) {
-			this.fbar = new FeatureBar(this);
-			this.fbar.setEnabled(this.settings.lookup.showFeatureBar);
-		}
+		if (!this.fbar) this.fbar = new FeatureBar(this);
 		return this.fbar;
+	}
+	/**
+	 * 会话级功能条开关覆盖：null = 跟随设置；true/false = 本次 Obsidian 会话内强制开/关。
+	 * 只存内存不落盘 —— 下次启动自动回到设置里的 lookup.showFeatureBar。
+	 */
+	private fbarSessionOverride: boolean | null = null;
+	/** ribbon 图标元素引用：随开关状态切换样式与提示文案 */
+	private fbarIcon: HTMLElement | null = null;
+
+	/** 功能条当前是否启用（会话覆盖优先于设置项） */
+	get featureBarEnabled(): boolean {
+		return this.fbarSessionOverride ?? this.settings.lookup.showFeatureBar;
+	}
+
+	/** ribbon / 命令共用的开关入口：切换会话级覆盖并立即生效（本轮生效） */
+	toggleFeatureBar(): void {
+		const next = !this.featureBarEnabled;
+		this.fbarSessionOverride = next;
+		this.applyFeatureBarState();
+		this.toast.show(
+			next ? "选中取词工具条：已开启（本轮生效）" : "选中取词工具条：已关闭（本轮生效）",
+			{ key: "lx-fbar" },
+		);
+	}
+
+	/** 设置项变更入口：清掉会话覆盖，让开关回归设置值 */
+	applyFeatureBarSetting(v: boolean): void {
+		this.fbarSessionOverride = null;
+		this.settings.lookup.showFeatureBar = v;
+		void this.saveSettings();
+		this.applyFeatureBarState();
+	}
+
+	/** 把当前开关状态推到 FeatureBar 实例与 ribbon 图标上 */
+	private applyFeatureBarState(): void {
+		const on = this.featureBarEnabled;
+		this.ensureFbar().setEnabled(on);
+		this.fbarIcon?.toggleClass("lx-ribbon-off", !on);
+		this.fbarIcon?.setAttribute(
+			"aria-label",
+			on ? "LinguaNex：关闭选中取词工具条" : "LinguaNex：开启选中取词工具条",
+		);
 	}
 	private pdfHandler: PdfSelectionHandler;
 	private resourcesByDict = new Map<string, DictResources>();
@@ -91,9 +133,13 @@ export default class LinguaNexPlugin extends Plugin {
 		this.addRibbonIcon("book-open-check", "LinguaNex 查词", () =>
 			this.ensurePanel().toggle(),
 		);
-		this.addRibbonIcon("circle-x", "LinguaNex 关闭查词面板", () => {
-			if (this.panel?.visible) this.panel.hide();
-		});
+		// 第二个 ribbon 是「选中取词工具条」开关（本轮生效）：
+		// 之前它挂的是"关闭查词面板"，面板不可见时点下去毫无反应，等同失效。
+		this.fbarIcon = this.addRibbonIcon(
+			"circle-x",
+			"LinguaNex：开关选中取词工具条",
+			() => this.toggleFeatureBar(),
+		);
 
 		this.addCommand({
 			id: "lookup-word",
@@ -130,6 +176,13 @@ export default class LinguaNexPlugin extends Plugin {
 			callback: () => {
 				if (this.panel?.visible) this.panel.hide();
 			},
+		});
+		// 与 ribbon 同一动作，交给用户在「设置 → 快捷键」里自行绑定热键；
+		// 不预置默认按键，避免占用用户已有的组合键
+		this.addCommand({
+			id: "toggle-feature-bar",
+			name: "开关选中取词工具条（本轮生效）",
+			callback: () => this.toggleFeatureBar(),
 		});
 		this.addCommand({
 			id: "open-manager",
@@ -184,6 +237,8 @@ export default class LinguaNexPlugin extends Plugin {
 		// 既避开移动端启动首帧闪烁，又保证监听必然生效（不再依赖选中事件触发创建）
 		window.setTimeout(() => {
 			this.ensureFbar();
+			// 创建后同步一次开关状态（此前只在这里设置过一次，设置页改动后从不回传）
+			this.applyFeatureBarState();
 			this.registerDomEvent(document, "selectionchange", () => {
 				this.ensureFbar().onSelectionChanged();
 			});
@@ -197,8 +252,49 @@ export default class LinguaNexPlugin extends Plugin {
 		this.pdfHandler.unregister();
 		this.panel?.dispose();
 		this.fbar?.dispose();
+		// 卸载时收起全部由插件弹出的提示，避免 Notice 残留在界面上
+		this.toast.hideAll();
 		for (const r of this.resourcesByDict.values()) r.dispose();
 		this.resourcesByDict.clear();
+	}
+
+	/**
+	 * 刷新已打开的 LinguaNex 视图：AI 开关、在线源启停等改动后立即重绘，
+	 * 不再需要重启插件才生效。
+	 */
+	refreshOpenViews(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VOCAB_REVIEW_VIEW)) {
+			const v = leaf.view as { reload?: () => void } | null;
+			v?.reload?.();
+		}
+		for (const leaf of this.app.workspace.getLeavesOfType(DICT_MANAGER_VIEW)) {
+			const v = leaf.view as { reload?: () => void } | null;
+			v?.reload?.();
+		}
+	}
+
+	/**
+	 * 保存笔记：笔记只对已收藏（已在生词本中）的单词持久保存。
+	 * @param book 目标生词本，缺省用默认生词本
+	 * @returns 是否写入成功；false 表示单词未收藏，调用方应提示用户先收藏
+	 */
+	async saveNote(word: string, note: string, book?: string): Promise<boolean> {
+		const w = word.trim();
+		if (!w) return false;
+		const b = book || this.settings.vocab.defaultBook;
+		// 收藏校验始终针对「当前要写入的生词本」，跨生词本不复用到默认本
+		const list = await this.vocab.entries(b);
+		const existed = list.some((e) => e.word.toLowerCase() === w.toLowerCase());
+		if (!existed) return false;
+		return await this.vocab.setNote(b, w, note);
+	}
+
+	/** 读取笔记：未收藏或尚无笔记时返回空串 */
+	async loadNote(word: string, book?: string): Promise<string> {
+		const w = word.trim();
+		if (!w) return "";
+		const e = await this.vocab.get(book || this.settings.vocab.defaultBook, w);
+		return e?.note ?? "";
 	}
 
 	/** 查词方式切换（设置页调用）：hover 模式查词即悬浮面板完整复用抽屉，drawer 模式为贴顶抽屉 */
@@ -251,6 +347,20 @@ export default class LinguaNexPlugin extends Plugin {
 		// 兼容旧配置：补齐 PDF 阅读查词配置
 		if (!this.settings.pdf) {
 			this.settings.pdf = { ...DEFAULT_SETTINGS.pdf };
+		}
+		// 兼容旧配置：补齐 AI 的自定义预设 / 模型列表 / 模型栏模式
+		if (!this.settings.ai) {
+			this.settings.ai = { ...DEFAULT_SETTINGS.ai };
+		} else {
+			if (!Array.isArray(this.settings.ai.customProviders)) {
+				this.settings.ai.customProviders = [];
+			}
+			if (!Array.isArray(this.settings.ai.modelList)) {
+				this.settings.ai.modelList = [];
+			}
+			if (this.settings.ai.modelMode !== "select") {
+				this.settings.ai.modelMode = "input";
+			}
 		}
 		// 兼容旧配置：补齐欧路同步配置
 		if (!this.settings.eudic) {
@@ -318,11 +428,12 @@ export default class LinguaNexPlugin extends Plugin {
 		this.settings.dictionaries = merged;
 		await this.saveSettings();
 		await this.reloadDictionaries();
-		if (!merged.length) {
-			new Notice("LinguaNex：目录中未发现有效 .mdx 词典");
-		} else {
-			new Notice(`LinguaNex：发现 ${merged.length} 个词典`);
-		}
+		this.toast.show(
+			!merged.length
+				? "LinguaNex：目录中未发现有效 .mdx 词典"
+				: `LinguaNex：发现 ${merged.length} 个词典`,
+			{ key: "lx-scan" },
+		);
 	}
 
 	/** 按配置加载/卸载词典与配套资源（防重入：加载期间重复调用直接忽略） */
@@ -357,8 +468,9 @@ export default class LinguaNexPlugin extends Plugin {
 						this.resourcesByDict.set(d.path, res);
 					}
 				} catch (e: any) {
-					new Notice(
+					this.toast.show(
 						`LinguaNex 加载词典失败：${d.name}（${e?.message ?? "未知错误"}）。可尝试停用后重新启用，或重启 Obsidian`,
+						{ key: `lx-dict-load-${d.path}`, duration: 5000 },
 					);
 				}
 			}
@@ -542,6 +654,7 @@ export default class LinguaNexPlugin extends Plugin {
 		const faved = await this.isFavorited(word);
 		if (faved) {
 			await this.removeFromDefaultBook(word);
+			this.toast.show(`已取消收藏：${word}`, { key: "lx-fav", duration: 2200 });
 			return;
 		}
 		await this.addToDefaultBook(word, "", false, context);
@@ -636,7 +749,10 @@ export default class LinguaNexPlugin extends Plugin {
 			reviewCount: 0,
 			context: ctx,
 		});
-		if (!silent) new Notice(`已收藏到「${book}」：${word}`);
+		// 收藏反馈统一走 toast：带明确时长，不会像 new Notice 那样长期挂住
+		if (!silent) {
+			this.toast.show(`已收藏到「${book}」：${word}`, { key: "lx-fav", duration: 2200 });
+		}
 	}
 
 	private async openView(type: string): Promise<void> {

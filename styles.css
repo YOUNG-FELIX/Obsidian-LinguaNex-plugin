@@ -492,6 +492,111 @@
 	font-size: 13px;
 	padding: 2px 5px;
 }
+/* ---------- 笔记入口（底部行 ‹ › 左侧） ---------- */
+.lingua-nex-panel .lx-note-wrap {
+	position: relative;
+	display: flex;
+	align-items: center;
+	margin-right: 4px;
+}
+.lingua-nex-panel .lx-note-btn {
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 12px;
+	line-height: 1;
+	padding: 2px 5px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.lingua-nex-panel .lx-note-btn:hover,
+.lingua-nex-panel .lx-note-btn.on {
+	color: var(--lx-accent);
+	border-color: var(--lx-border);
+	background: color-mix(in srgb, var(--lx-accent) 12%, transparent);
+}
+/* 笔记浮层：绝对定位在状态栏上方弹出，不占状态栏高度、不撑大面板底部 */
+.lingua-nex-panel .lx-note-pop {
+	position: absolute;
+	bottom: calc(100% + 6px);
+	/* 锚在右缘向左展开：入口本身贴近面板右侧，避免浮层溢出面板外 */
+	right: 0;
+	width: min(280px, 78vw);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 10px 9px;
+	background: var(--background-primary);
+	border: 1px solid var(--lx-border);
+	border-radius: 10px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+	z-index: 30;
+}
+.lingua-nex-panel .lx-note-pop.hidden {
+	display: none;
+}
+.lingua-nex-panel .lx-note-pop-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 11px;
+	color: var(--text-faint);
+}
+.lingua-nex-panel .lx-note-pop-close {
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	cursor: pointer;
+	font-size: 11px;
+	padding: 0 2px;
+}
+.lingua-nex-panel .lx-note-input {
+	width: 100%;
+	resize: none;
+	/* 1 行起步，JS 自适应到最多约 3 行，超出内部滚动 */
+	min-height: 26px;
+	max-height: 66px;
+	overflow-y: auto;
+	font-size: 12px;
+	line-height: 1.5;
+	padding: 4px 8px;
+	border-radius: 7px;
+	border: 1px solid var(--lx-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	outline: none;
+}
+.lingua-nex-panel .lx-note-input:focus {
+	border-color: var(--lx-accent);
+}
+.lingua-nex-panel .lx-note-pop-ops {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+}
+.lingua-nex-panel .lx-note-hint {
+	font-size: 10.5px;
+	color: var(--text-faint);
+}
+.lingua-nex-panel .lx-note-hint.warn {
+	color: var(--text-error, #e1484d);
+}
+.lingua-nex-panel .lx-note-save {
+	flex-shrink: 0;
+	font-size: 11px;
+	padding: 3px 12px;
+	border-radius: 999px;
+	border: 1px solid var(--lx-accent);
+	color: var(--lx-accent);
+	background: transparent;
+	cursor: pointer;
+}
+.lingua-nex-panel .lx-note-save:hover {
+	background: color-mix(in srgb, var(--lx-accent) 12%, transparent);
+}
+
 /* 左右切换按钮（上一次/下一次查的词）：窄条贴右下角，不占高度 */
 .lingua-nex-panel .lx-nav {
 	display: flex;
@@ -1149,6 +1254,23 @@ body.lingua-nex-panel-open {
 	margin-top: 8px;
 	border-top: 1px solid var(--lx-border);
 	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	/* 收起/滑出过渡：AI 内容生成结束才向上滑出，未用 AI 时不占底部空间 */
+	overflow: hidden;
+	max-height: 80px;
+	transition: max-height 0.22s ease, opacity 0.22s ease, transform 0.22s ease,
+		padding 0.22s ease, margin 0.22s ease, border-color 0.22s ease;
+}
+
+/* 收起态：高度归零并向下偏移，视觉上"往下收着" */
+.lingua-nex-panel .lx-ai-ask.lx-ask-collapsed {
+	max-height: 0;
+	opacity: 0;
+	transform: translateY(14px);
+	padding-top: 0;
+	padding-bottom: 0;
+	margin-top: 0;
+	border-top-color: transparent;
+	pointer-events: none;
 }
 .lingua-nex-panel .lx-ai-ask-input {
 	flex: 1;
@@ -1204,6 +1326,75 @@ body.lingua-nex-panel-open {
 	50% {
 		opacity: 0;
 	}
+}
+
+/* ribbon「选中取词工具条」开关的关闭态：降透明度，一眼看出当前是关着的 */
+.lx-ribbon-off {
+	opacity: 0.4;
+	filter: grayscale(1);
+}
+
+/* ---------- AI 自定义预设区 ---------- */
+.lx-ai-custom {
+	margin: 2px 0 10px;
+	padding: 8px 10px;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+.lx-ai-custom-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-bottom: 6px;
+}
+.lx-ai-custom-empty {
+	font-size: 11.5px;
+	color: var(--text-faint);
+	line-height: 1.5;
+}
+.lx-ai-custom-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+.lx-ai-custom-row:first-of-type {
+	border-top: none;
+}
+.lx-ai-custom-name {
+	flex: 0 0 auto;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+.lx-ai-custom-meta {
+	flex: 1;
+	min-width: 0;
+	font-size: 10.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* 预设命名弹窗输入框（Modal 内不受 .lx-input 作用域影响，单独兜底） */
+.lx-confirm .lx-input {
+	width: 100%;
+	margin: 0 0 12px;
+	padding: 5px 9px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 13px;
+	outline: none;
+}
+.lx-confirm .lx-input:focus {
+	border-color: var(--interactive-accent);
 }
 
 /* ---------- 悬浮窗（hover 查词）：简洁无阴影 ---------- */
@@ -1313,9 +1504,136 @@ body.lingua-nex-panel-open {
 .lx-word-head {
 	cursor: pointer;
 }
-.lx-word-head .lx-icon-btn {
-	float: left;
-	margin-right: 4px;
+/* 行首：左侧发音+单词+已学标签，右侧笔记区（右上角） */
+.lx-word-line1 {
+	display: flex;
+	align-items: flex-start;
+	gap: 4px;
+}
+.lx-word-line1 .lx-icon-btn {
+	flex: 0 0 auto;
+	margin-right: 2px;
+}
+.lx-word-line1 .lx-word {
+	/* 可收缩：长短语换行，避免把右上角笔记区顶出行外 */
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow-wrap: break-word;
+}
+.lx-word-line1 .lx-learned {
+	flex: 0 0 auto;
+}
+.lx-word-note-slot {
+	margin-left: auto;
+	flex: 0 0 auto;
+	width: 46%;
+	max-width: 240px;
+}
+
+/* ---------- 笔记区（复习列表行 / 复习卡片通用） ---------- */
+.lx-note-box {
+	position: relative;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 7px;
+	padding: 3px 6px 4px;
+	background: var(--background-secondary);
+}
+.lx-note-box.editing {
+	border-style: solid;
+	border-color: var(--lx-accent);
+}
+/* 只读预览：固定 2~3 行，过长内部滑动，绝不撑高卡片 */
+.lx-note-view {
+	font-size: 11px;
+	line-height: 1.45;
+	color: var(--text-muted);
+	max-height: 48px;
+	overflow-y: auto;
+	overflow-wrap: break-word;
+	white-space: pre-wrap;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
+}
+.lx-note-view.empty {
+	color: var(--text-faint);
+	font-size: 10.5px;
+}
+.lx-note-view.hidden,
+.lx-note-editwrap.hidden {
+	display: none;
+}
+.lx-note-pencil {
+	position: absolute;
+	top: 1px;
+	right: 2px;
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 10px;
+	line-height: 1;
+	padding: 1px 2px;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.14s ease;
+}
+.lx-note-box:hover .lx-note-pencil,
+.lx-note-pencil:focus {
+	opacity: 1;
+}
+/* 触屏无 hover：铅笔常驻，作为长按之外的显式入口 */
+@media (hover: none) {
+	.lx-note-pencil {
+		opacity: 1;
+	}
+}
+.lx-note-edit {
+	width: 100%;
+	resize: none;
+	min-height: 40px;
+	max-height: 66px;
+	overflow-y: auto;
+	font-size: 11.5px;
+	line-height: 1.45;
+	padding: 3px 6px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	outline: none;
+}
+.lx-note-edit:focus {
+	border-color: var(--lx-accent);
+}
+.lx-note-ops {
+	display: flex;
+	justify-content: flex-end;
+	gap: 5px;
+	margin-top: 4px;
+}
+.lx-note-op {
+	font-size: 10.5px;
+	line-height: 1;
+	padding: 3px 9px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+.lx-note-op.primary {
+	border-color: var(--lx-accent);
+	color: var(--lx-accent);
+}
+.lx-note-op:hover {
+	background: var(--background-modifier-hover);
+}
+/* 复习卡片右上角：绝对定位，避开单词与 meta 文字 */
+.lx-review-card > .lx-note-box {
+	position: absolute;
+	top: 10px;
+	right: 12px;
+	width: 44%;
+	max-width: 240px;
 }
 .lx-word {
 	font-weight: 600;
@@ -1393,6 +1711,28 @@ body.lingua-nex-panel-open {
 	color: var(--lx-accent);
 	display: inline-block;
 	margin-right: 8px;
+	/* 给右上角笔记区让位，避免长单词被压 */
+	max-width: 52%;
+	/* 给左上角发音按钮让出位置，长单词换行也不会压到喇叭 */
+	padding-left: 28px;
+	box-sizing: border-box;
+	overflow-wrap: break-word;
+}
+/* 卡片发音按钮：脱离行内流，钉在左上角 */
+.lx-review-card .lx-card-speak {
+	position: absolute;
+	top: 8px;
+	left: 10px;
+	z-index: 2;
+	float: none;
+	margin: 0;
+	padding: 2px 3px;
+	font-size: 14px;
+	line-height: 1;
+}
+.lx-review-meta {
+	/* 右侧留给笔记区，文字自然换行不重叠 */
+	padding-right: 46%;
 }
 .lx-review-def {
 	margin-top: 10px;

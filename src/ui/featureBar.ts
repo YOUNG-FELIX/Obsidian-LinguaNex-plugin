@@ -57,6 +57,10 @@ export class FeatureBar {
 		window.setTimeout(() => this.maybeShow(), 20);
 	}
 
+	/**
+	 * 开关状态由 plugin.applyFeatureBarState 统一推入：
+	 * ribbon 点击、命令热键、设置页开关三条路径最终都汇聚到这里，保证状态只有一个真源。
+	 */
 	setEnabled(v: boolean): void {
 		this.enabled = v;
 		if (!v) this.hide();

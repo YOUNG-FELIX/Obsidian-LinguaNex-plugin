@@ -28,7 +28,9 @@ LinguaNex reads your own `.mdx` / `.mdd` files (the MDict / GoldenDict format), 
 - **Learning heatmap** — month view of daily review volume (capped at 3 reviews per word per day), with a day detail panel: words reviewed, unique words, forgot / fuzzy / known split, average proficiency, accuracy and the word list.
 - **Pronunciation** — local `.mdd` audio first, then Youdao / Free Dictionary audio, then system TTS. A dedicated command (default `Mod+Shift+P`) speaks the panel word or the current selection.
 - **Online sources** — Youdao, Free Dictionary, and sentence translation (MyMemory / Baidu Translate), each toggleable.
-- **AI explanations** — OpenAI-compatible providers: OpenAI, DeepSeek, Moonshot (Kimi), Zhipu GLM, Qwen, Groq, Ollama (local).
+- **AI explanations** — OpenAI-compatible providers: OpenAI, DeepSeek, Moonshot (Kimi), Zhipu GLM, Qwen, Groq, Ollama (local). Save your own provider presets, then hit "Fetch models" to pick an available model from a dropdown (or type it manually).
+- **Per-word notes** — jot down thoughts from the 📝 button in the lookup panel footer or the top-right corner of review list rows / cards. Fixed height, scrolls internally, stored in the entry's `note` field (saved only for favourited words).
+- **Selection toolbar toggle** — the sidebar ✕ icon or the "Toggle selection toolbar" command temporarily disables the floating toolbar for the current session; the persistent switch still lives in settings.
 - **PDF selection lookup** — look up words selected inside PDFs.
 - **Eudic sync** — push vocabulary to Eudic (manual).
 - **Privacy-first** — no telemetry; settings and API keys stay in your vault.
@@ -66,6 +68,7 @@ LinguaNex is being submitted to the Obsidian community plugin directory. Once li
 | Look up word | `lookup-word` | Open the drawer lookup panel. |
 | Look up (hover) | `lookup-hover` | Popover next to the selection; opens the panel when nothing is selected. |
 | Close lookup panel | `close-panel` | Close the current panel. |
+| Toggle selection toolbar (this session) | `toggle-feature-bar` | Temporarily disable / restore the floating selection toolbar; resets to the setting value after restarting Obsidian. |
 | Open dictionary manager | `open-manager` | Manage local / online dictionaries and ordering. |
 | Open word review | `open-review` | Open spaced-repetition review. |
 | Toggle favorite | `fav-toggle` | Toggle the panel word (or the selection) in your vocabulary book. |

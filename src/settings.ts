@@ -1,7 +1,7 @@
-import { App, Modal, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
+import { App, Modal, PluginSettingTab, Setting, TFolder } from "obsidian";
 import type LinguaNexPlugin from "./main";
-import type { AIConfig } from "./core/ai";
-import { DEFAULT_PROMPT } from "./core/ai";
+import type { AIConfig, AICustomProvider } from "./core/ai";
+import { DEFAULT_PROMPT, fetchModels } from "./core/ai";
 
 /** AI 预设 Provider：选择后自动填充 Base URL 与模型 */
 export const AI_PROVIDERS: { name: string; baseUrl: string; model: string }[] = [
@@ -172,6 +172,10 @@ export const DEFAULT_SETTINGS: LinguaNexSettings = {
 		apiKey: "",
 		model: "gpt-4o-mini",
 		prompt: "",
+		// 自定义预设、已获取模型列表、模型栏模式（默认手填，拉到列表后可切下拉）
+		customProviders: [],
+		modelList: [],
+		modelMode: "input",
 	},
 	tts: {
 		enabled: true,
@@ -254,7 +258,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 
 		const suggestEl = containerEl.createDiv({ cls: "lx-dir-suggest" });
 
-		new Setting(containerEl)
+	// 已发现词典列表：本地词典与在线词典合并、按优先级统一排序
 	const dicts = this.plugin.settings.dictionaries;
 	// 在线词典并入「已发现词典」同一列表统一排序（名字带 online 小标签，可与本地词典一起 ↑/↓ 排序）
 	const onlineEntries: {
@@ -337,6 +341,9 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 				if (isOnline) {
 					r.cfg.enabled = !r.cfg.enabled;
 					await this.plugin.saveSettings();
+					// 在线源此前也只在保存后不重建源列表，启用/停用要重启才生效
+					this.plugin.refreshSources();
+					this.plugin.refreshOpenViews();
 				} else {
 					r.d.enabled = !r.d.enabled;
 					await this.plugin.saveSettings();
@@ -435,13 +442,15 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("选中取词工具条")
-			.setDesc("在编辑器中选中单词后显示查词/发音/收藏工具条")
+			.setDesc(
+				"在编辑器中选中单词后显示查词/发音/收藏工具条。这里是常驻开关；左侧栏 ✕ 图标与「开关选中取词工具条」命令只在本轮（本次打开 Obsidian）内临时开/关，下次启动回到此处设置。",
+			)
 			.addToggle((t) =>
 				t
 					.setValue(this.plugin.settings.lookup.showFeatureBar)
-					.onChange(async (v) => {
-						this.plugin.settings.lookup.showFeatureBar = v;
-						await this.plugin.saveSettings();
+					.onChange((v) => {
+						// 此前这里只写 settings，从不回传 FeatureBar 实例，导致开关形同虚设
+						this.plugin.applyFeatureBarSetting(v);
 					}),
 			);
 
@@ -655,24 +664,43 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("启用 AI 释义")
-			.setDesc("词典未命中时调用大模型补全释义（需自行配置）")
+			.setDesc("开启后查词面板与复习面板立即出现 AI 释义入口（无需重启插件）；词典未命中时可调用大模型补全释义")
 			.addToggle((t) =>
 				t
 					.setValue(this.plugin.settings.ai.enabled)
 					.onChange(async (v) => {
 						this.plugin.settings.ai.enabled = v;
 						await this.plugin.saveSettings();
+						// 关键：重建解释源列表并刷新已打开的视图，否则要重启才出现 AI 选项
+						this.plugin.refreshSources();
+						this.plugin.refreshOpenViews();
 					}),
 			);
 
 		new Setting(containerEl)
 			.setName("预设 Provider")
-			.setDesc("选择后自动填充 Base URL 与模型，再填入你的 API Key 即可使用")
+			.setDesc("选择后自动填充 Base URL 与模型；选「自定义…」则完全由你自己填写，填好后可点下方「保存为预设」存起来下次直接切换")
 			.addDropdown((d) => {
 				d.addOption("", "选择预设…");
 				for (const p of AI_PROVIDERS) d.addOption(p.name, p.name);
+				// 用户保存的自定义预设与内置预设同列
+				for (const c of this.plugin.settings.ai.customProviders ?? []) {
+					d.addOption(`custom:${c.name}`, c.name);
+				}
+				d.addOption("__custom__", "自定义…");
 				d.onChange(async (v) => {
-					const p = AI_PROVIDERS.find((x) => x.name === v);
+					if (v === "__custom__") {
+						// 自定义：切到手填模式，Base URL / 模型保持当前值由用户自由改写
+						this.plugin.settings.ai.modelMode = "input";
+						await this.plugin.saveSettings();
+						this.display();
+						return;
+					}
+					const p = v.startsWith("custom:")
+						? (this.plugin.settings.ai.customProviders ?? []).find(
+								(x) => x.name === v.slice(7),
+							)
+						: AI_PROVIDERS.find((x) => x.name === v);
 					if (!p) return;
 					this.plugin.settings.ai.baseUrl = p.baseUrl;
 					this.plugin.settings.ai.model = p.model;
@@ -680,6 +708,59 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					this.display();
 				});
 			});
+
+		// 自定义预设保存/删除区
+		const customBox = containerEl.createDiv({ cls: "lx-ai-custom" });
+		const customHead = customBox.createDiv({
+			cls: "lx-ai-custom-head",
+			text: "自定义预设",
+		});
+		const savePresetBtn = customHead.createEl("button", {
+			cls: "lx-mini-btn",
+			text: "＋ 保存当前为预设",
+		});
+		savePresetBtn.title = "把当前填写的 Base URL 与模型保存成一个命名预设";
+		savePresetBtn.addEventListener("click", () => {
+			const cfg = this.plugin.settings.ai;
+			new PresetNameModal(this.app, cfg.baseUrl, (name) => {
+				const list = this.plugin.settings.ai.customProviders ?? [];
+				const idx = list.findIndex((x) => x.name === name);
+				const item: AICustomProvider = {
+					name,
+					baseUrl: cfg.baseUrl.trim(),
+					model: cfg.model.trim(),
+				};
+				if (idx >= 0) list[idx] = item;
+				else list.push(item);
+				this.plugin.settings.ai.customProviders = list;
+				void this.plugin.saveSettings().then(() => this.display());
+			}).open();
+		});
+		const customs = this.plugin.settings.ai.customProviders ?? [];
+		if (!customs.length) {
+			customBox.createDiv({
+				cls: "lx-ai-custom-empty",
+				text: "尚无自定义预设。填好 Base URL 与模型后点「保存当前为预设」即可。",
+			});
+		} else {
+			for (const c of customs) {
+				const row = customBox.createDiv({ cls: "lx-ai-custom-row" });
+				row.createSpan({ cls: "lx-ai-custom-name", text: c.name });
+				row.createSpan({ cls: "lx-ai-custom-meta", text: `${c.baseUrl} · ${c.model}` });
+				const del = row.createEl("button", {
+					cls: "lx-sort-btn lx-danger",
+					text: "✕",
+				});
+				del.title = `删除预设「${c.name}」`;
+				del.addEventListener("click", async () => {
+					this.plugin.settings.ai.customProviders = (
+						this.plugin.settings.ai.customProviders ?? []
+					).filter((x) => x.name !== c.name);
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			}
+		}
 
 		new Setting(containerEl)
 			.setName("API Base URL")
@@ -706,17 +787,75 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 				t.inputEl.type = "password";
 			});
 
-		new Setting(containerEl)
+		// 模型栏：手填 / 从已获取列表下拉选择，两种模式可随时切换
+		const aiCfg = this.plugin.settings.ai;
+		const modelList = aiCfg.modelList ?? [];
+		const useSelect = aiCfg.modelMode === "select" && modelList.length > 0;
+		const modelSetting = new Setting(containerEl)
 			.setName("模型")
-			.addText((t) =>
+			.setDesc(
+				useSelect
+					? `已从服务端获取到 ${modelList.length} 个可用模型，下拉选择即可；也可切回手动输入`
+					: "手填模型名；或点「获取模型」从服务端拉取可用列表后下拉选择，避免填错",
+			);
+		if (useSelect) {
+			modelSetting.addDropdown((d) => {
+				for (const m of modelList) d.addOption(m, m);
+				// 当前值不在列表里时补一项，避免显示为空
+				if (aiCfg.model && !modelList.includes(aiCfg.model)) {
+					d.addOption(aiCfg.model, `${aiCfg.model}（当前手填值）`);
+				}
+				d.addOption("__input__", "手动输入…");
+				d.setValue(aiCfg.model || modelList[0]);
+				d.onChange(async (v) => {
+					if (v === "__input__") {
+						this.plugin.settings.ai.modelMode = "input";
+						await this.plugin.saveSettings();
+						this.display();
+						return;
+					}
+					this.plugin.settings.ai.model = v;
+					await this.plugin.saveSettings();
+				});
+			});
+		} else {
+			modelSetting.addText((t) =>
 				t
 					.setPlaceholder("gpt-4o-mini")
-					.setValue(this.plugin.settings.ai.model)
+					.setValue(aiCfg.model)
 					.onChange(async (v) => {
 						this.plugin.settings.ai.model = v.trim();
 						await this.plugin.saveSettings();
 					}),
 			);
+		}
+		modelSetting.addButton((b) =>
+			b.setButtonText("获取模型").onClick(async () => {
+				const btn = b.buttonEl;
+				const old = btn.textContent ?? "获取模型";
+				btn.textContent = "获取中…";
+				btn.disabled = true;
+				try {
+					const list = await fetchModels(this.plugin.settings.ai);
+					this.plugin.settings.ai.modelList = list;
+					this.plugin.settings.ai.modelMode = "select";
+					await this.plugin.saveSettings();
+					this.plugin.toast.show(`已获取 ${list.length} 个可用模型，请在右侧下拉选择`, {
+						key: "lx-ai-models",
+						duration: 3200,
+					});
+					this.display();
+				} catch (e: any) {
+					this.plugin.toast.show(`获取模型失败：${e?.message ?? "未知错误"}`, {
+						key: "lx-ai-models",
+						duration: 5000,
+					});
+				} finally {
+					btn.textContent = old;
+					btn.disabled = false;
+				}
+			}),
+		);
 
 		new Setting(containerEl)
 			.setName("温度 temperature（可选）")
@@ -810,9 +949,15 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					btn.disabled = true;
 					try {
 						const info = await this.checkAiConnection();
-						new Notice(`AI 连通成功：${info}`);
+						this.plugin.toast.show(`AI 连通成功：${info}`, {
+							key: "lx-ai-test",
+							duration: 4000,
+						});
 					} catch (e: any) {
-						new Notice(`AI 连接失败：${e?.message ?? "未知错误"}`);
+						this.plugin.toast.show(`AI 连接失败：${e?.message ?? "未知错误"}`, {
+							key: "lx-ai-test",
+							duration: 5000,
+						});
 					} finally {
 						btn.textContent = oldText;
 						btn.disabled = false;
@@ -895,11 +1040,16 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					if (res.ok) {
 						b.setButtonText("连接成功 ✓");
 						b.setCta();
-						new Notice(`✓ 欧路连接成功：${res.message}`);
+						this.plugin.toast.show(`✓ 欧路连接成功：${res.message}`, {
+							key: "lx-eudic",
+						});
 					} else {
 						b.setButtonText("连接失败 ✗");
 						b.setWarning();
-						new Notice(`✗ ${res.message}`);
+						this.plugin.toast.show(`✗ ${res.message}`, {
+							key: "lx-eudic",
+							duration: 4000,
+						});
 					}
 					window.setTimeout(() => {
 						b.setDisabled(false);
@@ -947,13 +1097,17 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					b.setButtonText("同步中…");
 					try {
 						const r = await this.plugin.syncLocalToEudicManual();
-						new Notice(
+						this.plugin.toast.show(
 							r.added === 0
 								? `✓ 已是最新（本地 ${r.skipped} 词已在欧路）`
 								: `✓ 新增 ${r.added} 词${r.failed ? `，失败 ${r.failed}` : ""}`,
+							{ key: "lx-eudic-sync", duration: 4000 },
 						);
 					} catch (error) {
-						new Notice(`同步失败：${(error as Error).message}`);
+						this.plugin.toast.show(`同步失败：${(error as Error).message}`, {
+							key: "lx-eudic-sync",
+							duration: 4000,
+						});
 					}
 					b.setDisabled(false);
 					b.setButtonText("本地 → 欧路");
@@ -965,9 +1119,15 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					b.setButtonText("同步中…");
 					try {
 						const r = await this.plugin.syncEudicToLocalManual();
-						new Notice(`✓ 导入 ${r.imported} 词，跳过 ${r.skipped} 词`);
+						this.plugin.toast.show(`✓ 导入 ${r.imported} 词，跳过 ${r.skipped} 词`, {
+							key: "lx-eudic-sync",
+							duration: 4000,
+						});
 					} catch (error) {
-						new Notice(`同步失败：${(error as Error).message}`);
+						this.plugin.toast.show(`同步失败：${(error as Error).message}`, {
+							key: "lx-eudic-sync",
+							duration: 4000,
+						});
 					}
 					b.setDisabled(false);
 					b.setButtonText("欧路 → 本地");
@@ -1047,36 +1207,14 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	/** AI 连通性检查：请求 /models 列表验证 Base URL + API Key */
 	private async checkAiConnection(): Promise<string> {
 		const cfg = this.plugin.settings.ai;
-		const base = (cfg.baseUrl || "").trim().replace(/\/+$/, "");
-		if (!base || !cfg.apiKey) {
-			throw new Error("请先填写 Base URL 与 API Key");
+		// 复用与「获取模型」完全相同的请求路径，测通即代表模型列表可取
+		const models = await fetchModels(cfg);
+		if (!models.includes(cfg.model.trim())) {
+			return `服务可达（当前模型 ${cfg.model || "未填"} 不在列表中，可用：${models
+				.slice(0, 5)
+				.join("、")}${models.length > 5 ? "…" : ""}）`;
 		}
-		const ctrl = new AbortController();
-		const timer = window.setTimeout(() => ctrl.abort(), 15000);
-		try {
-			const resp = await fetch(`${base}/models`, {
-				headers: { Authorization: `Bearer ${cfg.apiKey}` },
-				signal: ctrl.signal,
-			});
-			if (!resp.ok) {
-				const body = await resp.text().catch(() => "");
-				throw new Error(`HTTP ${resp.status} ${body.slice(0, 120)}`);
-			}
-			const data = await resp.json();
-			const models: string[] = Array.isArray(data?.data)
-				? data.data
-						.map((m: any) => (m && typeof m.id === "string" ? m.id : ""))
-						.filter(Boolean)
-				: [];
-			if (models.length && !models.includes(cfg.model.trim())) {
-				return `服务可达（当前模型 ${cfg.model || "未填"} 不在列表中，可用：${models
-					.slice(0, 5)
-					.join("、")}${models.length > 5 ? "…" : ""}）`;
-			}
-			return "服务可达，模型可用";
-		} finally {
-			window.clearTimeout(timer);
-		}
+		return "服务可达，模型可用";
 	}
 
 	/** 递归列出 vault 内全部文件夹（相对路径，根目录为 ""） */
@@ -1128,7 +1266,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	/** 添加词典目录：记录并扫描 */
 	private async addDictDir(dir: string): Promise<void> {
 		if (this.plugin.settings.dictDirs.includes(dir)) {
-			new Notice(`目录已添加：${dir || "/"}`);
+			this.plugin.toast.show(`目录已添加：${dir || "/"}`, { key: "lx-dict-dir" });
 			return;
 		}
 		this.plugin.settings.dictDirs.push(dir);
@@ -1162,7 +1300,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 				input.value = b;
 				box.empty();
-				new Notice(`默认生词本已设为：${b}`);
+				this.plugin.toast.show(`默认生词本已设为：${b}`, { key: "lx-book" });
 				this.display();
 			});
 		}
@@ -1171,6 +1309,55 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 	private async openView(type: string): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(false);
 		await leaf.setViewState({ type, active: true });
+	}
+}
+
+/** 自定义预设命名弹窗：把当前 Base URL + 模型存成一个可复用的命名预设 */
+export class PresetNameModal extends Modal {
+	constructor(
+		app: App,
+		private currentBaseUrl: string,
+		private onDone: (name: string) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("保存为自定义预设");
+		const box = this.contentEl.createDiv({ cls: "lx-confirm" });
+		box.createEl("p", {
+			text: `将当前 Base URL（${this.currentBaseUrl || "未填"}）与模型保存为一个命名预设，之后可在「预设 Provider」下拉里直接切换。`,
+		});
+		const input = box.createEl("input", {
+			cls: "lx-input",
+			attr: { placeholder: "预设名称，如：我的中转站", spellcheck: "false" },
+		});
+		input.style.width = "100%";
+		const ops = box.createDiv({ cls: "lx-confirm-ops" });
+		const ok = ops.createEl("button", { cls: "mod-cta", text: "保存" });
+		const submit = (): void => {
+			const name = input.value.trim();
+			if (!name) {
+				input.focus();
+				return;
+			}
+			this.close();
+			this.onDone(name);
+		};
+		ok.addEventListener("click", submit);
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				submit();
+			}
+		});
+		const cancel = ops.createEl("button", { text: "取消" });
+		cancel.addEventListener("click", () => this.close());
+		input.focus();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 

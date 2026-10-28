@@ -1,3 +1,10 @@
+/** 用户自建的自定义 Provider 预设：可命名保存，之后在预设下拉里直接切换 */
+export interface AICustomProvider {
+	name: string;
+	baseUrl: string;
+	model: string;
+}
+
 export interface AIConfig {
 	enabled: boolean;
 	baseUrl: string;
@@ -6,6 +13,12 @@ export interface AIConfig {
 	prompt: string;
 	temperature?: number;
 	maxTokens?: number;
+	/** 用户保存的自定义 Provider 预设（与内置预设同列出现在下拉里） */
+	customProviders?: AICustomProvider[];
+	/** 最近一次「获取模型」拉到的可用模型 id 列表（缓存，供下拉选择） */
+	modelList?: string[];
+	/** 模型栏模式：select=从已获取列表下拉选择，input=手动填写 */
+	modelMode?: "select" | "input";
 }
 
 /** 内置标准提示词（默认，不选模板时使用）：按标题组织，直接给出内容，不用序号列表 */
@@ -121,6 +134,42 @@ async function* parseSSE(
 		if (controller.signal.aborted) {
 			throw new DOMException("Aborted", "AbortError");
 		}
+	}
+}
+
+/**
+ * 拉取服务端可用模型列表（GET /models）。
+ * 供设置页「获取模型」按钮使用：拉到后写入设置，模型栏即可下拉选择，避免手填拼错。
+ */
+export async function fetchModels(
+	config: AIConfig,
+	timeoutMs = 15000,
+): Promise<string[]> {
+	const base = (config.baseUrl || "").trim().replace(/\/+$/, "");
+	if (!base) throw new Error("请先填写 API Base URL");
+	if (!config.apiKey) throw new Error("请先填写 API Key");
+	const ctrl = new AbortController();
+	const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
+	try {
+		const resp = await fetch(`${base}/models`, {
+			headers: { Authorization: `Bearer ${config.apiKey}` },
+			signal: ctrl.signal,
+		});
+		if (!resp.ok) {
+			const body = await resp.text().catch(() => "");
+			throw new Error(`HTTP ${resp.status} ${body.slice(0, 160)}`);
+		}
+		const data = await resp.json();
+		const list: string[] = Array.isArray(data?.data)
+			? data.data
+					.map((m: any) => (m && typeof m.id === "string" ? m.id : ""))
+					.filter(Boolean)
+			: [];
+		if (!list.length) throw new Error("接口未返回可用模型（data 为空）");
+		// 去重后按字母序，便于在下拉里快速定位
+		return [...new Set(list)].sort((a, b) => a.localeCompare(b));
+	} finally {
+		window.clearTimeout(timer);
 	}
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "lingua-nex",
-  "version": "0.10.4",
+  "version": "0.11.0",
   "description": "LinguaNex — 本地 MDX/MDD 词典查词与生词复习 Obsidian 插件",
   "main": "main.js",
   "scripts": {

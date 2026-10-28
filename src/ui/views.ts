@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Modal, Notice, Setting, App, MarkdownRenderer, Component } from "obsidian";
+import { ItemView, WorkspaceLeaf, Modal, App, MarkdownRenderer, Component } from "obsidian";
 import type LinguaNexPlugin from "../main";
 import type { LinguaNexMdict } from "../core/mdict";
 import type { DictItem, LinguaNexSettings } from "../settings";
@@ -10,6 +10,7 @@ import { aiLookupStream } from "../core/ai";
 class ConfirmModal extends Modal {
 	constructor(
 		app: App,
+		private plugin: LinguaNexPlugin,
 		private title: string,
 		private message: string,
 		private onConfirm: () => Promise<void>,
@@ -28,7 +29,10 @@ class ConfirmModal extends Modal {
 			try {
 				await this.onConfirm();
 			} catch (e: any) {
-				new Notice(`操作失败：${e?.message ?? "未知错误"}`);
+				this.plugin.toast.show(`操作失败：${e?.message ?? "未知错误"}`, {
+					key: "lx-confirm-err",
+					duration: 4000,
+				});
 			}
 		});
 		const cancel = ops.createEl("button", { text: "取消" });
@@ -69,6 +73,11 @@ export class DictManagerView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {}
+
+	/** 供设置页改完 AI/在线源开关后强制重绘，避免必须重启插件才生效 */
+	reload(): void {
+		this.render();
+	}
 
 	private render(): void {
 		const root = this.contentEl;
@@ -178,6 +187,7 @@ export class DictManagerView extends ItemView {
 					del.addEventListener("click", async () => {
 						new ConfirmModal(
 							this.app,
+							this.plugin,
 							"移出词典",
 							`确定将「${r.name}」移出书架吗？仅移除配置，不会删除词典文件。`,
 							async () => {
@@ -250,6 +260,7 @@ export class DictManagerView extends ItemView {
 				e.stopPropagation();
 				new ConfirmModal(
 					this.app,
+					this.plugin,
 					"删除生词本",
 					`确定删除生词本「${b}」及其全部词条吗？此操作不可恢复。`,
 					async () => {
@@ -307,6 +318,11 @@ export class VocabReviewView extends ItemView {
 	async onClose(): Promise<void> {
 		this.heatmapPopover?.remove();
 		this.heatmapPopover = null;
+	}
+
+	/** 供设置页改完 AI/在线源开关后强制重绘：源列表与笔记区一并刷新，不用重启插件 */
+	reload(): void {
+		this.render();
 	}
 
 	/** 热力图日期面板挂在 body 上，重绘/关闭视图时一并移除，避免节点残留 */
@@ -428,7 +444,9 @@ export class VocabReviewView extends ItemView {
 		for (const e of entries) {
 			const row = list.createDiv({ cls: "lx-word-row" });
 			const head = row.createDiv({ cls: "lx-word-head" });
-			const speak = head.createEl("button", {
+			// 行首一行：发音 + 单词 + 已学标签（左） 与 笔记区（右上角）
+			const line1 = head.createDiv({ cls: "lx-word-line1" });
+			const speak = line1.createEl("button", {
 				cls: "lx-icon-btn lx-speak",
 				text: "🔊",
 			});
@@ -437,16 +455,20 @@ export class VocabReviewView extends ItemView {
 				ev.stopPropagation();
 				void this.plugin.speakWord(e.word);
 			});
-			head.createSpan({ cls: "lx-word", text: e.word });
+			line1.createSpan({ cls: "lx-word", text: e.word });
 			if ((e.reviewCount ?? 0) > 0) {
-				head.createSpan({ cls: "lx-learned", text: "✓ 已学" });
+				line1.createSpan({ cls: "lx-learned", text: "✓ 已学" });
 			}
-			head.createSpan({
+			const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
+			head.createDiv({
 				cls: "lx-word-meta",
 				text:
 					`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
 					`${proficiencyLabel(e)} · ${dueLabel(e)}`,
 			});
+			// 列表每行右上角笔记区：预览 2~3 行可滑动，长按/双击进入编辑
+			// entries 已在内存中，直接把 note 传进去，避免 N 次重复读文件
+			makeNoteBox(this.plugin, noteSlot).attach(book, e.word, e.note);
 			const defToggle = row.createEl("button", {
 				cls: "lx-def-toggle",
 				text: "释义 ▾",
@@ -495,6 +517,7 @@ export class VocabReviewView extends ItemView {
 			rm.addEventListener("click", () => {
 				new ConfirmModal(
 					this.app,
+					this.plugin,
 					"移除生词",
 					`确定从「${book}」移除「${e.word}」吗？`,
 					async () => {
@@ -529,12 +552,13 @@ export class VocabReviewView extends ItemView {
 		// 按复习算法排序：该复习的在前，再按到期时间由近到远
 		const deck = sortByDue(entries);
 		const card = root.createDiv({ cls: "lx-review-card" });
-		const wordEl = card.createEl("div", { cls: "lx-review-word" });
+		// 发音按钮固定在卡片左上角：长单词换行时不再被行内流挤到右侧、与右上角笔记区重叠
 		const speak = card.createEl("button", {
-			cls: "lx-icon-btn lx-speak",
+			cls: "lx-icon-btn lx-speak lx-card-speak",
 			text: "🔊",
 		});
 		speak.title = "发音";
+		const wordEl = card.createEl("div", { cls: "lx-review-word" });
 		const metaEl = card.createEl("div", { cls: "lx-review-meta" });
 		const defToggle = card.createEl("button", {
 			cls: "lx-def-toggle",
@@ -542,6 +566,8 @@ export class VocabReviewView extends ItemView {
 		});
 
 		const defHost = card.createDiv({ cls: "lx-def-host" });
+		// 卡片右上角笔记区：随当前词条切换重新绑定
+		const noteBox = makeNoteBox(this.plugin, card);
 		const btns = root.createDiv({ cls: "lx-review-btns" });
 		const again = btns.createEl("button", { cls: "lx-rbtn", text: "忘记" });
 		const hard = btns.createEl("button", { cls: "lx-rbtn", text: "模糊" });
@@ -581,6 +607,8 @@ export class VocabReviewView extends ItemView {
 			defHost.removeClass("open");
 			defToggle.setText("显示释义 ▾");
 			panel = makeDefPanel(this.plugin, defHost, e);
+			// 切换词条时把笔记区重新绑定到当前词
+			noteBox.attach(book, e.word, e.note);
 
 
 			counter.textContent = `${i + 1} / ${deck.length}`;
@@ -725,7 +753,7 @@ export class VocabReviewView extends ItemView {
 				review: next,
 			};
 			await this.plugin.saveSettings();
-			new Notice("复习算法参数已保存");
+			this.plugin.toast.show("复习算法参数已保存", { key: "lx-algo" });
 			this.render();
 		});
 		reset.addEventListener("click", async () => {
@@ -734,7 +762,7 @@ export class VocabReviewView extends ItemView {
 				review: { ...DEFAULT_REVIEW },
 			};
 			await this.plugin.saveSettings();
-			new Notice("已恢复默认复习参数");
+			this.plugin.toast.show("已恢复默认复习参数", { key: "lx-algo" });
 			this.render();
 		});
 	}
@@ -1064,6 +1092,154 @@ function makeDefPanel(
 		}
 	};
 	return { load };
+}
+
+/**
+ * 笔记区（复习面板通用：列表每行右上角 / 卡片右上角）。
+ *
+ * 交互约定：
+ * - 默认只读预览：固定 2~3 行高，内容过长在内部滑动查看，绝不撑高所在卡片
+ * - 移动端长按 500ms 进入编辑；桌面端双击或点 ✎ 图标进入编辑
+ * - 保存走 plugin.saveNote：单词未收藏时只提示、不写入
+ *
+ * @param host 宿主容器（列表行内右上角槽位 / 卡片本体）
+ * @returns attach(book, word) 绑定当前词条并载入已有笔记
+ */
+function makeNoteBox(
+	plugin: LinguaNexPlugin,
+	host: HTMLElement,
+): {
+	attach: (book: string, word: string, initialNote?: string) => void;
+} {
+	const box = host.createDiv({ cls: "lx-note-box" });
+	const view = box.createDiv({ cls: "lx-note-view" });
+	const editWrap = box.createDiv({ cls: "lx-note-editwrap hidden" });
+	const pencil = box.createEl("button", {
+		cls: "lx-note-pencil",
+		text: "✎",
+		attr: { "aria-label": "编辑笔记" },
+	});
+	pencil.title = "编辑笔记（移动端也可长按笔记区）";
+
+	let curBook = "";
+	let curWord = "";
+	let note = "";
+	let editing = false;
+
+	const paintView = (): void => {
+		view.empty();
+		if (note) {
+			view.setText(note);
+			view.removeClass("empty");
+		} else {
+			view.setText("＋ 笔记");
+			view.addClass("empty");
+		}
+	};
+
+	const reload = async (): Promise<void> => {
+		note = curWord ? await plugin.loadNote(curWord, curBook) : "";
+		paintView();
+	};
+
+	/**
+	 * 绑定当前词条并载入笔记。
+	 * @param initialNote 词条对象上已有的 note 直接传入，省掉每个词条一次异步读文件
+	 */
+	const attach = (book: string, word: string, initialNote?: string): void => {
+		curBook = book;
+		curWord = word;
+		if (initialNote !== undefined) {
+			note = initialNote;
+			paintView();
+		} else {
+			void reload();
+		}
+	};
+
+	const endEdit = (): void => {
+		editing = false;
+		editWrap.empty();
+		editWrap.addClass("hidden");
+		view.removeClass("hidden");
+		box.removeClass("editing");
+	};
+
+	const beginEdit = (): void => {
+		if (editing || !curWord) return;
+		editing = true;
+		box.addClass("editing");
+		view.addClass("hidden");
+		editWrap.empty();
+		editWrap.removeClass("hidden");
+		const ta = editWrap.createEl("textarea", {
+			cls: "lx-note-edit",
+			attr: { placeholder: "记点想法…", rows: "2", spellcheck: "false" },
+		});
+		ta.value = note;
+		// 编辑框同样最多约 3 行，超出内部滚动，不撑高卡片
+		ta.addEventListener("input", () => {
+			ta.style.height = "auto";
+			ta.style.height = `${Math.min(ta.scrollHeight, 66)}px`;
+		});
+		const ops = editWrap.createDiv({ cls: "lx-note-ops" });
+		const save = ops.createEl("button", { cls: "lx-note-op primary", text: "保存" });
+		const cancel = ops.createEl("button", { cls: "lx-note-op", text: "取消" });
+		save.addEventListener("click", () => {
+			void (async () => {
+				const ok = await plugin.saveNote(curWord, ta.value, curBook);
+				if (!ok) {
+					plugin.toast.show("请先收藏该单词，笔记仅对已收藏的单词保存", {
+						key: "lx-note",
+						duration: 3600,
+					});
+					return;
+				}
+				plugin.toast.show("笔记已保存", { key: "lx-note" });
+				await reload();
+				endEdit();
+			})();
+		});
+		cancel.addEventListener("click", endEdit);
+		ta.focus();
+	};
+
+	// 桌面端：双击进入编辑
+	view.addEventListener("dblclick", (e) => {
+		e.stopPropagation();
+		beginEdit();
+	});
+	pencil.addEventListener("click", (e) => {
+		e.stopPropagation();
+		beginEdit();
+	});
+
+	// 移动端：长按 500ms 进入编辑（鼠标不走这条，桌面端用双击/图标）
+	let pressTimer: number | null = null;
+	const clearPress = (): void => {
+		if (pressTimer != null) {
+			window.clearTimeout(pressTimer);
+			pressTimer = null;
+		}
+	};
+	view.addEventListener("pointerdown", (e) => {
+		e.stopPropagation();
+		if (e.pointerType === "mouse") return;
+		pressTimer = window.setTimeout(() => {
+			pressTimer = null;
+			beginEdit();
+		}, 500);
+	});
+	view.addEventListener("pointerup", clearPress);
+	view.addEventListener("pointermove", clearPress);
+	view.addEventListener("pointercancel", clearPress);
+	view.addEventListener("pointerleave", clearPress);
+
+	// 笔记区内的一切交互都不应冒泡到外层（发音、评级等）
+	box.addEventListener("click", (e) => e.stopPropagation());
+	box.addEventListener("mousedown", (e) => e.stopPropagation());
+
+	return { attach };
 }
 
 /** 视图创建工厂 */

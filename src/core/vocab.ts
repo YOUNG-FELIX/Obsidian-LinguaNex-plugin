@@ -23,6 +23,8 @@ export interface VocabEntry {
 	word: string;
 	dictId: string;
 	definition?: string;
+	/** 用户笔记：查词/复习时随手记录的想法。仅对已收藏（即在生词本中）的单词持久保存 */
+	note?: string;
 	addedAt: number;
 	reviewCount: number;
 	lastReviewAt?: number;
@@ -278,6 +280,25 @@ export class VocabStore {
 		if (idx < 0) return;
 		list[idx] = { ...list[idx], ...patch };
 		await this.save(book, list);
+	}
+
+	/** 取单个词条（未找到返回 null；供笔记读取等场景使用） */
+	async get(book: string, word: string): Promise<VocabEntry | null> {
+		const list = await this.entries(book);
+		return list.find((e) => e.word.toLowerCase() === word.toLowerCase()) ?? null;
+	}
+
+	/**
+	 * 写入笔记。仅更新 note 字段，不动复习数据。
+	 * 调用方需先确保该单词已收藏（生词本中存在该词条）。
+	 */
+	async setNote(book: string, word: string, note: string): Promise<boolean> {
+		const list = await this.entries(book);
+		const idx = list.findIndex((e) => e.word.toLowerCase() === word.toLowerCase());
+		if (idx < 0) return false;
+		list[idx] = { ...list[idx], note };
+		await this.save(book, list);
+		return true;
 	}
 
 	async dueEntries(book: string, now = Date.now()): Promise<VocabEntry[]> {

@@ -87,6 +87,18 @@ export class LookupPanel {
 	/** 未命中占位：切源未命中时中间区域也切换显示提示，避免残留上一源内容 */
 	private missEl: HTMLElement | null = null;
 	private aiAskInput: HTMLInputElement | null = null;
+	/** 追问条根节点：默认向下收起，只有 AI 内容真正生成完成后才向上滑出 */
+	private askBar: HTMLElement | null = null;
+	/** 状态文字自动清除定时器（见 setStatus） */
+	private statusClearTimer: number | null = null;
+	/** 笔记入口按钮（底部行 ‹ › 左侧）与对应的浮层 */
+	private noteBtn: HTMLElement | null = null;
+	private notePop: HTMLElement | null = null;
+	private noteInput: HTMLTextAreaElement | null = null;
+	private noteHint: HTMLElement | null = null;
+	private notePopOpen = false;
+	/** 展开笔记浮层时归属的单词：换词即自动收起，避免笔记写串词 */
+	private noteWordAtOpen = "";
 	private aiContext: ChatMessage[] = [];
 	private mdComp: Component | null = null;
 	/** AI 释义缓存：key = 源|单词|提示词，value = 已生成的 Markdown；面板未关闭前切换源复用，不重复请求 */
@@ -189,6 +201,19 @@ export class LookupPanel {
 			attr: { placeholder: "搜索…", spellcheck: "false" },
 		});
 		const row2 = this.statusEl.createDiv({ cls: "lx-status-row lx-status-row2" });
+		// 笔记入口：与左右切换 ‹ › 同一行、位于其左侧；展开用浮层，不撑大底部状态栏
+		const noteWrap = row2.createDiv({ cls: "lx-note-wrap" });
+		this.noteBtn = noteWrap.createEl("button", {
+			cls: "lx-note-btn",
+			attr: { "aria-label": "笔记" },
+		});
+		this.noteBtn.setText("📝");
+		this.noteBtn.title = "给当前单词写笔记（仅收藏后保存）";
+		this.notePop = noteWrap.createDiv({ cls: "lx-note-pop hidden" });
+		this.noteBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			void this.toggleNotePop();
+		});
 		const nav = row2.createDiv({ cls: "lx-nav" });
 		this.prevBtn = nav.createEl("button", { cls: "lx-icon-btn", attr: { "aria-label": "上一个" } });
 		this.prevBtn.setText("‹");
@@ -298,6 +323,8 @@ export class LookupPanel {
 		// 上限由 CSS max-height 限定；AI 区不再依赖 flex-grow，天然避免折叠
 		this.input.focus();
 		this.input.select();
+		// 每次打开都把追问条复位为收起，避免上一轮 AI 会话的追问条残留
+		this.hideAskBar();
 		document.addEventListener("keydown", this.escCloseHandler, true);
 	}
 
@@ -334,6 +361,7 @@ export class LookupPanel {
 		this.root.style.width = `${w}px`;
 		this.root.style.maxHeight = `${maxH}px`;
 		this.floatClose.addClass("shown");
+		this.hideAskBar();
 		// 顶部栏实际高度写入 CSS 变量：内容区 margin-top 精确腾位，杜绝 tab 遮挡首行释义
 		this.syncTopHeight();
 		// 点击面板外任意处自动关闭（头部收起、内容区外都生效；iframe 内部点击不冒泡到外层）
@@ -366,6 +394,7 @@ export class LookupPanel {
 		this.root.style.width = `${w}px`;
 		this.root.style.maxHeight = `${maxH}px`;
 		this.floatClose.addClass("shown");
+		this.hideAskBar();
 		document.addEventListener("keydown", this.escCloseHandler, true);
 		this.syncTopHeight();
 		document.addEventListener("mousedown", this.outsideClose, true);
@@ -567,6 +596,9 @@ export class LookupPanel {
 		this.resizeState = null;
 		this.aiAbort?.abort();
 		this.aiCache.clear();
+		// 收起追问条与笔记浮层，回到干净的初始态
+		this.hideAskBar();
+		this.closeNotePop();
 		if (this.sourceSwitchEl) {
 			this.sourceSwitchEl.remove();
 			this.sourceSwitchEl = null;
@@ -603,7 +635,7 @@ export class LookupPanel {
 		if (!ai) {
 			this.show();
 			this.syncInputs(w);
-			this.setStatus("AI 未开启：请在设置中开启 AI 并配置 API");
+			this.setStatus("AI 未开启：请在设置中开启 AI 并配置 API", 4000);
 			return;
 		}
 		this.activeSourceId = ai.id;
@@ -620,7 +652,7 @@ export class LookupPanel {
 		if (!ai) {
 			this.show();
 			this.syncInputs(w);
-			this.setStatus("AI 未开启：请在设置中开启 AI 并配置 API");
+			this.setStatus("AI 未开启：请在设置中开启 AI 并配置 API", 4000);
 			return;
 		}
 		this.activeSourceId = ai.id;
@@ -644,15 +676,17 @@ export class LookupPanel {
 			}
 		}
 		this.syncInputs(w);
+		// 换了词就把笔记浮层收起，防止笔记写到上一个词上
+		if (this.notePopOpen && this.noteWordAtOpen !== w) this.closeNotePop();
 		// 新查询开始即清掉旧未命中占位，避免切源后残留上一源的提示
 		this.missEl?.addClass("hidden");
-		this.setStatus(`查询中：${w}…`);
+		this.setStatus(`查询中：${w}…`, 0);
 		this.aiAbort?.abort();
 		this.aiAbort = null;
 
 		const s = this.sources.find((x) => x.id === this.activeSourceId);
 		if (!s) {
-			this.setStatus("暂无可用解释源，请在设置中添加词典或开启 AI");
+			this.setStatus("暂无可用解释源，请在设置中添加词典或开启 AI", 4000);
 			return;
 		}
 		if (s.isAI) {
@@ -665,7 +699,7 @@ export class LookupPanel {
 		}
 		const mdict = s.mdict;
 		if (!mdict || !mdict.isLoaded) {
-			this.setStatus("该词典尚未加载，请稍候或重新扫描");
+			this.setStatus("该词典尚未加载，请稍候或重新扫描", 4000);
 			return;
 		}
 		const res = mdict.lookup(w);
@@ -709,7 +743,7 @@ export class LookupPanel {
 			}
 		}
 		// 所有词典都未命中：切换为未命中占位
-		this.setStatus(`未命中：${w}（当前词典 ${shortName(s.name, 16)}，可点 AI 释义）`);
+		this.setStatus(`未命中：${w}（当前词典 ${shortName(s.name, 16)}，可点 AI 释义）`, 4000);
 		this.showMiss(w, shortName(s.name, 16));
 		void this.refreshFavState(w);
 	}
@@ -739,7 +773,7 @@ export class LookupPanel {
 			void this.refreshFavState(w);
 			return;
 		}
-		this.setStatus(`未命中：当前${shortName(s.name, 16)}词典未命中`);
+		this.setStatus(`未命中：当前${shortName(s.name, 16)}词典未命中`, 4000);
 		this.showMiss(w, shortName(s.name, 16));
 		void this.refreshFavState(w);
 	}
@@ -769,7 +803,7 @@ export class LookupPanel {
 	): Promise<void> {
 		const cfg = this.plugin.settings.ai as AIConfig;
 		if (!cfg.apiKey) {
-			this.setStatus("AI 未配置：请在设置中填写 API Key 与地址");
+			this.setStatus("AI 未配置：请在设置中填写 API Key 与地址", 4000);
 			return;
 		}
 		// 缓存命中：面板未关闭、同一单词与同一提示词，直接复用旧结果，不重复请求
@@ -778,10 +812,14 @@ export class LookupPanel {
 		if (cached !== undefined) {
 			this.renderAiResult(s, w, cached, pushHistory);
 			this.setStatus("");
+			// 复用缓存等同"内容已就绪"，追问条直接滑出
+			this.showAskBar();
 			void this.refreshFavState(w);
 			return;
 		}
-		this.setStatus("AI 释义中…");
+		this.setStatus("AI 释义中…", 0);
+		// 生成中先收起追问条，避免还没内容就一直占着底部空间
+		this.hideAskBar();
 		this.aiAbort?.abort();
 		this.aiAbort = new AbortController();
 		const signal = this.aiAbort.signal;
@@ -826,10 +864,14 @@ export class LookupPanel {
 			this.aiCache.set(cacheKey, md);
 			this.renderAiResult(s, w, md, pushHistory);
 			this.setStatus("");
+			// 生成结束：追问条才向上滑出
+			this.showAskBar();
 			void this.refreshFavState(w);
 		} catch (e: any) {
 			if (e?.name === "AbortError") return;
-			this.setStatus(`AI 失败：${e?.message ?? "未知错误"}`);
+			this.setStatus(`AI 失败：${e?.message ?? "未知错误"}`, 0);
+			// 没生成出内容就别把追问条滑出来
+			if (!md) this.hideAskBar();
 			if (!md) {
 				renderEl.empty();
 				renderEl.createDiv({
@@ -1046,8 +1088,12 @@ export class LookupPanel {
 		if (!this.contentWrap) return;
 		// 追问条是第三个独立板块：挂在 contentWrap 底部，与词典区、AI 区平级；
 		// 绝不挂进 AI 区内（避免挤压 AI 回答高度、也避免 AI 区隐藏时追问条一起消失）
-		// 追问条是第三个独立板块：挂在面板 root 底部（contentWrap 之外），不参与词典/AI 滚动，固定可见
-		const bar = this.root.createDiv({ cls: "lx-ai-ask" });
+		// 追问条是第三个独立板块：挂在面板 root 底部（contentWrap 之外），不参与词典/AI 滚动。
+		// 默认带 lx-ask-collapsed 向下收起：没用 AI 时不占底部空间，生成完内容才滑出。
+		const bar = this.root.createDiv({ cls: "lx-ai-ask lx-ask-collapsed" });
+		this.askBar = bar;
+		// 收起态高度归零，但仍占位以便 CSS 过渡；滑出时移除该类
+		bar.addEventListener("transitionend", () => this.updateScrollbar());
 		const inp = bar.createEl("input", {
 			cls: "lx-ai-ask-input",
 			attr: { placeholder: "追问 AI…", spellcheck: "false" },
@@ -1064,18 +1110,121 @@ export class LookupPanel {
 		this.aiAskInput = inp;
 	}
 
+	/** 当前笔记归属的单词（顶部输入框优先，其次历史当前词） */
+	private noteWord(): string {
+		return (this.input.value.trim() || this.currentWord()).trim();
+	}
+
+	/** 展开/收起笔记浮层 */
+	private async toggleNotePop(): Promise<void> {
+		if (this.notePopOpen) {
+			this.closeNotePop();
+			return;
+		}
+		const w = this.noteWord();
+		if (!w) {
+			this.setStatus("暂无词条：先查一个词再写笔记", 3000);
+			return;
+		}
+		this.buildNotePop();
+		this.notePop?.removeClass("hidden");
+		this.notePopOpen = true;
+		this.noteWordAtOpen = w;
+		this.noteBtn?.addClass("on");
+		this.noteInput!.value = await this.plugin.loadNote(w);
+		this.autoGrowNote();
+		this.noteInput!.focus();
+	}
+
+	/** 收起笔记浮层（面板关闭、换词、再次点按钮都走这里） */
+	private closeNotePop(): void {
+		if (!this.notePopOpen) return;
+		this.notePopOpen = false;
+		this.notePop?.addClass("hidden");
+		this.noteBtn?.removeClass("on");
+	}
+
+	private buildNotePop(): void {
+		const pop = this.notePop;
+		if (!pop) return;
+		pop.empty();
+		const head = pop.createDiv({ cls: "lx-note-pop-head" });
+		head.createSpan({ cls: "lx-note-pop-title", text: "笔记" });
+		const close = head.createEl("button", {
+			cls: "lx-note-pop-close",
+			text: "✕",
+			attr: { "aria-label": "关闭" },
+		});
+		close.addEventListener("click", () => this.closeNotePop());
+		this.noteInput = pop.createEl("textarea", {
+			cls: "lx-note-input",
+			attr: {
+				placeholder: "记点想法…（仅收藏后保存）",
+				rows: "1",
+				spellcheck: "false",
+			},
+		});
+		this.noteInput.addEventListener("input", () => this.autoGrowNote());
+		const ops = pop.createDiv({ cls: "lx-note-pop-ops" });
+		this.noteHint = ops.createSpan({ cls: "lx-note-hint", text: "" });
+		const save = ops.createEl("button", { cls: "lx-note-save", text: "保存" });
+		save.addEventListener("click", () => void this.saveNoteCurrent());
+	}
+
+	/** 文本区高度自适应：1 行起步，最多约 3 行，超出在内部滚动，绝不撑大面板 */
+	private autoGrowNote(): void {
+		const el = this.noteInput;
+		if (!el) return;
+		el.style.height = "auto";
+		el.style.height = `${Math.min(el.scrollHeight, 66)}px`;
+	}
+
+	/** 保存笔记：只对已收藏单词落盘，未收藏仅提示 */
+	private async saveNoteCurrent(): Promise<void> {
+		const w = this.noteWord();
+		if (!w) return;
+		const text = this.noteInput?.value ?? "";
+		const ok = await this.plugin.saveNote(w, text);
+		if (!ok) {
+			this.plugin.toast.show("请先收藏该单词，笔记仅对已收藏的单词保存", {
+				key: "lx-note",
+				duration: 3600,
+			});
+			if (this.noteHint) {
+				this.noteHint.setText("未收藏 · 未保存");
+				this.noteHint.addClass("warn");
+			}
+			return;
+		}
+		this.plugin.toast.show("笔记已保存", { key: "lx-note" });
+		if (this.noteHint) {
+			this.noteHint.setText("已保存");
+			this.noteHint.removeClass("warn");
+		}
+	}
+
+	/** 追问条向上滑出：仅在 AI 释义内容生成结束后调用，避免生成过程中一直占着底部空间 */
+	private showAskBar(): void {
+		this.askBar?.removeClass("lx-ask-collapsed");
+	}
+
+	/** 追问条向下收起：面板打开/关闭、AI 关闭、请求失败时复位 */
+	private hideAskBar(): void {
+		this.askBar?.addClass("lx-ask-collapsed");
+	}
+
 	/** 基于当前词条对话上下文继续追问 AI（多轮流式） */
 	private async askFollowUp(): Promise<void> {
 		const q = this.aiAskInput?.value.trim();
 		if (!q) return;
 		const cfg = this.plugin.settings.ai as AIConfig;
 		if (!cfg.apiKey) {
-			this.setStatus("AI 未配置：请在设置中填写 API Key 与地址");
+			this.setStatus("AI 未配置：请在设置中填写 API Key 与地址", 4000);
 			return;
 		}
 		this.aiAskInput!.value = "";
 		this.aiContext.push({ role: "user", content: q });
-		this.setStatus("AI 回答中…");
+		this.setStatus("AI 回答中…", 0);
 		this.aiAbort?.abort();
 		this.aiAbort = new AbortController();
 		const signal = this.aiAbort.signal;
@@ -1116,9 +1265,11 @@ export class LookupPanel {
 			await paint();
 			this.aiContext.push({ role: "assistant", content: md });
 			this.setStatus("");
+			// 追问回答完成，确保追问条处于滑出态
+			this.showAskBar();
 		} catch (e: any) {
 			if (e?.name === "AbortError") return;
-			this.setStatus(`AI 失败：${e?.message ?? "未知错误"}`);
+			this.setStatus(`AI 失败：${e?.message ?? "未知错误"}`, 0);
 			if (!md) {
 				renderEl.empty();
 				renderEl.createDiv({
@@ -1155,9 +1306,26 @@ export class LookupPanel {
 		}
 	}
 
-	private setStatus(text: string): void {
+	/**
+	 * 写入底部状态文字。
+	 * 带默认自动清除：此前「已收藏：xxx」「已取消收藏：xxx」写进去就再没人清，
+	 * 会一直挂在面板底部直到下一次操作覆盖，看着像提示不会消失。
+	 * @param autoClearMs 自动清除延时；传 0 表示常驻（如持续性的错误说明）
+	 */
+	private setStatus(text: string, autoClearMs = 2500): void {
 		this.statusText.textContent = text;
 		this.statusText.classList.toggle("hidden", !text);
+		if (this.statusClearTimer != null) {
+			window.clearTimeout(this.statusClearTimer);
+			this.statusClearTimer = null;
+		}
+		if (text && autoClearMs > 0) {
+			this.statusClearTimer = window.setTimeout(() => {
+				this.statusClearTimer = null;
+				this.statusText.textContent = "";
+				this.statusText.classList.add("hidden");
+			}, autoClearMs);
+		}
 	}
 
 	/** 命中状态：小字胶囊 tag（词典名）+ 词条数，不喧宾夺主；点胶囊弹出源切换列表 */
@@ -1396,6 +1564,7 @@ export class LookupPanel {
 		if (faved) {
 			await this.plugin.removeFromDefaultBook(w);
 			this.setStatus(`已取消收藏：${w}`);
+			this.plugin.toast.show(`已取消收藏：${w}`, { key: "lx-fav", duration: 2200 });
 		} else {
 			await this.plugin.addToDefaultBook(w);
 			this.setStatus(`已收藏：${w}`);
@@ -1406,6 +1575,10 @@ export class LookupPanel {
 	dispose(): void {
 		this.mdComp?.unload();
 		this.mdComp = null;
+		if (this.statusClearTimer != null) {
+			window.clearTimeout(this.statusClearTimer);
+			this.statusClearTimer = null;
+		}
 		this.root.detach();
 	}
 }
