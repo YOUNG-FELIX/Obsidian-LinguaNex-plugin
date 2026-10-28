@@ -50,11 +50,10 @@ export class ToastManager {
 		const key = opts.key ?? `lx-auto-${++this.seq}`;
 		const existing = this.active.get(key);
 		if (existing) {
-			// 复用同一条：更新文案并重置计时，避免同一类反馈堆叠成一摞
-			existing.notice.setMessage(msg);
-			window.clearTimeout(existing.timer);
-			existing.timer = window.setTimeout(() => this.dismiss(key), duration);
-			return;
+			// 同 key 不能只 setMessage：Notice 内部的自动隐藏计时不会因此重置，
+			// 第二条消息会在上一条的到期时刻被收走，时长就错乱了。
+			// 先收起旧的，再用新时长重建一条，保证"最后一条消息"有完整的展示时间。
+			this.dismiss(key);
 		}
 		const notice = new Notice(msg, duration);
 		const timer = window.setTimeout(() => this.dismiss(key), duration);

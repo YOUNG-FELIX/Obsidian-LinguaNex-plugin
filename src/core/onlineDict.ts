@@ -248,7 +248,7 @@ export function buildOnlineDoc(entry: YoudaoEntry, sourceName: string): string {
 	const rows = entry.groups
 		.map(
 			(g) =>
-				`<div class="lx-ol-pos">${g.pos || "释义"}</div><ul class="lx-ol-defs">${g.defs
+				`<div class="lx-ol-pos">${escapeHtml(g.pos) || "释义"}</div><ul class="lx-ol-defs">${g.defs
 					.map((d) => `<li>${escapeHtml(d)}</li>`)
 					.join("")}</ul>`,
 		)

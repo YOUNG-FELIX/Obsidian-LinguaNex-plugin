@@ -81,15 +81,12 @@ export default class LinguaNexPlugin extends Plugin {
 		return this.fbarSessionOverride ?? this.settings.lookup.showFeatureBar;
 	}
 
-	/** ribbon / 命令共用的开关入口：切换会话级覆盖并立即生效（本轮生效） */
+	/** ribbon / 命令共用的开关入口：切换会话级覆盖并立即生效 */
 	toggleFeatureBar(): void {
 		const next = !this.featureBarEnabled;
 		this.fbarSessionOverride = next;
 		this.applyFeatureBarState();
-		this.toast.show(
-			next ? "选中取词工具条：已开启（本轮生效）" : "选中取词工具条：已关闭（本轮生效）",
-			{ key: "lx-fbar" },
-		);
+		this.toast.show(next ? "工具条已开启" : "工具条已关闭", { key: "lx-fbar" });
 	}
 
 	/** 设置项变更入口：清掉会话覆盖，让开关回归设置值 */
@@ -107,7 +104,7 @@ export default class LinguaNexPlugin extends Plugin {
 		this.fbarIcon?.toggleClass("lx-ribbon-off", !on);
 		this.fbarIcon?.setAttribute(
 			"aria-label",
-			on ? "LinguaNex：关闭选中取词工具条" : "LinguaNex：开启选中取词工具条",
+			on ? "LinguaNex 取词工具条（已开启，点击关闭）" : "LinguaNex 取词工具条（已关闭，点击开启）",
 		);
 	}
 	private pdfHandler: PdfSelectionHandler;
@@ -133,7 +130,7 @@ export default class LinguaNexPlugin extends Plugin {
 		this.addRibbonIcon("book-open-check", "LinguaNex 查词", () =>
 			this.ensurePanel().toggle(),
 		);
-		// 第二个 ribbon 是「选中取词工具条」开关（本轮生效）：
+		// 第二个 ribbon 是「选中取词工具条」开关（仅本次会话有效）：
 		// 之前它挂的是"关闭查词面板"，面板不可见时点下去毫无反应，等同失效。
 		this.fbarIcon = this.addRibbonIcon(
 			"circle-x",
@@ -181,7 +178,7 @@ export default class LinguaNexPlugin extends Plugin {
 		// 不预置默认按键，避免占用用户已有的组合键
 		this.addCommand({
 			id: "toggle-feature-bar",
-			name: "开关选中取词工具条（本轮生效）",
+			name: "开关选中取词工具条",
 			callback: () => this.toggleFeatureBar(),
 		});
 		this.addCommand({

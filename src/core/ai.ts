@@ -35,6 +35,31 @@ export const DEFAULT_PROMPT =
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
+/**
+ * 拦截明文 http 的 API 地址（localhost 与局域网私网段除外）。
+ * API Key 会以 Bearer 头明文发出，走 http 等于把密钥交给链路上任何一跳。
+ * 局域网段放行是为了兼容部署在内网的 Ollama / 自建网关。
+ */
+function assertSafeBaseUrl(base: string): void {
+	if (/^https:\/\//i.test(base)) return;
+	if (!/^http:\/\//i.test(base)) {
+		throw new Error("API Base URL 必须是 http(s) 地址");
+	}
+	const host = base.replace(/^http:\/\//i, "").split(/[/?#]/)[0]?.split(":")[0] ?? "";
+	const h = host.toLowerCase();
+	const safe =
+		h === "localhost" ||
+		h === "127.0.0.1" ||
+		h === "[::1]" ||
+		h === "::1" ||
+		/^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) ||
+		/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) ||
+		/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(h);
+	if (!safe) {
+		throw new Error("明文 http 会泄露 API Key，请改用 https（内网地址可豁免）");
+	}
+}
+
 export interface ChatMessage {
 	role: "system" | "user" | "assistant";
 	content: string;
@@ -59,6 +84,7 @@ export async function aiLookupStream(
 	messages?: ChatMessage[],
 ): Promise<AsyncIterable<string>> {
 	const base = config.baseUrl.replace(/\/+$/, "");
+	assertSafeBaseUrl(base);
 	const url = `${base}/chat/completions`;
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -148,6 +174,7 @@ export async function fetchModels(
 	const base = (config.baseUrl || "").trim().replace(/\/+$/, "");
 	if (!base) throw new Error("请先填写 API Base URL");
 	if (!config.apiKey) throw new Error("请先填写 API Key");
+	assertSafeBaseUrl(base);
 	const ctrl = new AbortController();
 	const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
 	try {

@@ -4,6 +4,7 @@ import type { LinguaNexMdict } from "../core/mdict";
 import type { DictResources } from "../core/resources";
 import { aiLookupStream, type AIConfig, type ChatMessage } from "../core/ai";
 import { playAudioUrl, playMddAudio, speakTTS, extractSoundPath } from "../core/audio";
+import { sanitizeDictHtml } from "../core/sanitize";
 import { type YoudaoEntry } from "../core/onlineDict";
 
 export interface LookupSource {
@@ -1387,6 +1388,8 @@ export class LookupPanel {
 	 * 覆盖 link/script/img 的 src/href（含 file://、bres:、相对路径）与 sound:/bres: 内嵌引用。
 	 */
 	buildDoc(html: string, mdict: LinguaNexMdict, resources?: DictResources): string {
+		// 入参是第三方 .mdx 的释义 HTML：先消毒再加工，杜绝脚本进入同源 iframe
+		html = sanitizeDictHtml(html);
 		const resolve = (raw: string): string | null => {
 			const clean = raw
 				.replace(/^file:\/\/\//i, "")

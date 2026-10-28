@@ -443,7 +443,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("选中取词工具条")
 			.setDesc(
-				"在编辑器中选中单词后显示查词/发音/收藏工具条。这里是常驻开关；左侧栏 ✕ 图标与「开关选中取词工具条」命令只在本轮（本次打开 Obsidian）内临时开/关，下次启动回到此处设置。",
+				"选中单词后显示查词/发音/收藏工具条。左侧栏图标与「开关选中取词工具条」命令为临时开关，仅本次会话有效，重启后以此处设置为准。",
 			)
 			.addToggle((t) =>
 				t
