@@ -23,7 +23,6 @@ export class HoverPopover {
 		document.addEventListener("selectionchange", this.onSel);
 		document.addEventListener("scroll", this.onScroll, true);
 		document.addEventListener("mousedown", this.onDocMouseDown);
-		document.addEventListener("keydown", this.onKeyDown);
 	}
 
 	disable(): void {
@@ -31,13 +30,8 @@ export class HoverPopover {
 		document.removeEventListener("selectionchange", this.onSel);
 		document.removeEventListener("scroll", this.onScroll, true);
 		document.removeEventListener("mousedown", this.onDocMouseDown);
-		document.removeEventListener("keydown", this.onKeyDown);
 		this.hide();
 	}
-
-	private onKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") this.hide();
-	};
 
 	private onSel = (): void => {
 		if (!this.enabled) return;

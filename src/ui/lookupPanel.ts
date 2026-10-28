@@ -213,9 +213,6 @@ export class LookupPanel {
 						}
 						void this.lookup(w, true, false, true);
 					}
-				} else if (e.key === "Escape") {
-					e.preventDefault();
-					this.hide();
 				}
 			});
 		};
@@ -298,7 +295,6 @@ export class LookupPanel {
 		// 上限由 CSS max-height 限定；AI 区不再依赖 flex-grow，天然避免折叠
 		this.input.focus();
 		this.input.select();
-		document.addEventListener("keydown", this.escCloseHandler, true);
 	}
 
 	/**
@@ -338,7 +334,6 @@ export class LookupPanel {
 		this.syncTopHeight();
 		// 点击面板外任意处自动关闭（头部收起、内容区外都生效；iframe 内部点击不冒泡到外层）
 		document.addEventListener("mousedown", this.outsideClose, true);
-		document.addEventListener("keydown", this.escCloseHandler, true);
 		await this.lookup(word, true, true, true);
 	}
 
@@ -366,7 +361,6 @@ export class LookupPanel {
 		this.root.style.width = `${w}px`;
 		this.root.style.maxHeight = `${maxH}px`;
 		this.floatClose.addClass("shown");
-		document.addEventListener("keydown", this.escCloseHandler, true);
 		this.syncTopHeight();
 		document.addEventListener("mousedown", this.outsideClose, true);
 		if (word) await this.lookup(word, true, true, true);
@@ -427,18 +421,6 @@ export class LookupPanel {
 		if (!this.root.hasClass("lx-floating")) return;
 		if (t === this.iframe || (t instanceof Element && t.closest?.("iframe"))) return;
 		if (!this.root.contains(t)) this.hide();
-	};
-
-	/** Esc 关闭（capture 阶段：焦点在 CM6 时也能先截获；iframe 内焦点由 bindIframeKeys 处理） */
-	private escCloseHandler = (e: KeyboardEvent): void => {
-		if (e.key !== "Escape" || !this.shown) return;
-		// 若焦点在输入框，让输入框自己的 Esc 逻辑先走（清空输入），不要提前 hide
-		const target = e.target as HTMLElement;
-		const inInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-		if (inInput) return;
-		e.preventDefault();
-		e.stopPropagation();
-		this.hide();
 	};
 
 	/**
@@ -556,7 +538,6 @@ export class LookupPanel {
 		this.root.removeClass("lx-floating");
 		this.floatClose.removeClass("shown");
 		document.removeEventListener("mousedown", this.outsideClose, true);
-		document.removeEventListener("keydown", this.escCloseHandler, true);
 		this.root.style.removeProperty("top");
 		this.root.style.removeProperty("left");
 		this.root.style.removeProperty("width");
