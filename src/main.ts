@@ -358,10 +358,15 @@ export default class LinguaNexPlugin extends Plugin {
 			if (this.settings.ai.modelMode !== "select") {
 				this.settings.ai.modelMode = "input";
 			}
+
 		}
 		// 兼容旧配置：补齐欧路同步配置
 		if (!this.settings.eudic) {
 			this.settings.eudic = { ...DEFAULT_SETTINGS.eudic };
+		}
+		// 兼容旧配置：补齐密钥持久化策略（缺省为落盘，保持既有行为）
+		if (!this.settings.security || typeof this.settings.security.persistSecrets !== "boolean") {
+			this.settings.security = { persistSecrets: true };
 		}
 		// 兼容旧配置：补齐发音控制配置
 		if (!this.settings.audio) {
@@ -392,7 +397,20 @@ export default class LinguaNexPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * 落盘设置。开启「不持久化保存密钥」时，写盘副本里把 AI API Key 与欧路 Token 清空，
+	 * 内存中的 settings 保持原值，本次会话照常可用。
+	 * data.json 常被 Obsidian Sync / Git 同步，密钥不该跟着一起走。
+	 */
 	async saveSettings(): Promise<void> {
+		if (this.settings.security?.persistSecrets === false) {
+			await this.saveData({
+				...this.settings,
+				ai: { ...this.settings.ai, apiKey: "" },
+				eudic: { ...this.settings.eudic, token: "" },
+			});
+			return;
+		}
 		await this.saveData(this.settings);
 	}
 

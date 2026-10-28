@@ -147,6 +147,10 @@ export interface LinguaNexSettings {
 		/** manual=手动；auto=收藏生词时自动同步 */
 		syncMode: "manual" | "auto";
 	};
+	/** 密钥持久化策略：关闭后所有密钥只存内存，不写入 data.json */
+	security: {
+		persistSecrets: boolean;
+	};
 }
 
 export const DEFAULT_SETTINGS: LinguaNexSettings = {
@@ -223,6 +227,10 @@ export const DEFAULT_SETTINGS: LinguaNexSettings = {
 		language: "en",
 		categoryId: "0",
 		syncMode: "manual",
+	},
+	security: {
+		// 默认落盘；关闭后 AI Key 与欧路 Token 只存内存
+		persistSecrets: true,
 	},
 };
 
@@ -774,8 +782,11 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		const aiKeySetting = new Setting(containerEl)
 			.setName("API Key")
+			.setDesc(
+				"会以明文写入插件配置 data.json；若该目录被 Obsidian Sync / Git 同步，密钥也会一并同步。介意的话请关掉下方「持久化保存 API Key」。",
+			)
 			.addText((t) => {
 				t
 					.setPlaceholder("sk-...")
@@ -786,6 +797,30 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					});
 				t.inputEl.type = "password";
 			});
+		// 未持久化时给出明确状态，避免用户以为已经存好了
+		if (this.plugin.settings.security?.persistSecrets === false && this.plugin.settings.ai.apiKey) {
+			aiKeySetting.addButton((b) => {
+				b.setButtonText("未持久化").setDisabled(true).setWarning();
+				b.buttonEl.title = "当前仅存于内存，重启 Obsidian 后需重新填写";
+			});
+		}
+
+		new Setting(containerEl).setName("隐私与安全").setHeading();
+
+		new Setting(containerEl)
+			.setName("持久化保存密钥")
+			.setDesc(
+				"关闭后 AI API Key 与欧路 Token 只保存在内存中，不写入插件配置 data.json，重启 Obsidian 后需重新填写。Obsidian 插件没有系统钥匙串可用，这是唯一能真正避免密钥落盘的方式；data.json 常被 Obsidian Sync / Git 同步，密钥默认会跟着一起同步。",
+			)
+			.addToggle((t) =>
+				t
+					.setValue(this.plugin.settings.security?.persistSecrets !== false)
+					.onChange(async (v) => {
+						this.plugin.settings.security = { persistSecrets: v };
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			);
 
 		// 模型栏：手填 / 从已获取列表下拉选择，两种模式可随时切换
 		const aiCfg = this.plugin.settings.ai;

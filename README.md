@@ -33,7 +33,7 @@ LinguaNex reads your own `.mdx` / `.mdd` files (the MDict / GoldenDict format), 
 - **Selection toolbar toggle** — the sidebar icon or the "Toggle selection toolbar" command switches the floating toolbar for the current session; the persistent switch lives in settings.
 - **PDF selection lookup** — look up words selected inside PDFs.
 - **Eudic sync** — push vocabulary to Eudic (manual).
-- **Privacy-first** — no telemetry; settings and API keys stay in your vault.
+- **Privacy-first** — no telemetry; keys live in your plugin config by default and can be set to memory-only ("Privacy & security" → persist secrets).
 
 ## Installation
 

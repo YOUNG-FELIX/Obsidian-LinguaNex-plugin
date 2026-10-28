@@ -15,6 +15,7 @@ export interface AIConfig {
 	maxTokens?: number;
 	/** 用户保存的自定义 Provider 预设（与内置预设同列出现在下拉里） */
 	customProviders?: AICustomProvider[];
+
 	/** 最近一次「获取模型」拉到的可用模型 id 列表（缓存，供下拉选择） */
 	modelList?: string[];
 	/** 模型栏模式：select=从已获取列表下拉选择，input=手动填写 */

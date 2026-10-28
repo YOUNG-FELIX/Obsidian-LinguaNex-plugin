@@ -4,9 +4,13 @@
 
 ### 安全
 
+- **密钥可设置为不落盘**：新增「设置 → 隐私与安全 → 持久化保存密钥」。关闭后 **AI API Key 与欧路 Token 只保存在内存**，写盘副本中清空这两项，重启 Obsidian 后需重新填写；其余配置（模型列表、自定义预设、同步模式等）不受影响。
+  说明：Obsidian 插件没有系统钥匙串可用，任何持久化都只能落在 vault 内，因此**无法做到真正的加密存储**；而 `data.json` 常被 Obsidian Sync / Git 同步，密钥默认会跟着同步。关掉这个开关是唯一能真正避免密钥落盘的方式。
+
 - **词典 HTML 消毒**：释义内容（第三方 `.mdx` / 在线接口返回）此前未经处理即写入 `srcdoc` iframe，而该 iframe 的 sandbox 是 `allow-scripts allow-same-origin`，与 Obsidian **同源** —— 词典文件里的 `<script>`、内联 `on*=` 事件、`javascript:` 链接可直接操作宿主 DOM 与插件数据。现新增 `src/core/sanitize.ts`，在注入前剥离脚本、事件属性、伪协议 URL 与 `iframe/object/embed/form/base` 标签；同时保留 `<link>`、`<img>`、`sound://` 等查词管线依赖的结构（已用 12 条正反用例验证）。
 - **API Key 防泄露**：`API Base URL` 为明文 `http` 且非本地/内网地址时拒绝请求（Key 以 Bearer 头明文传输），内网段（localhost、127.0.0.1、10.x、192.168.x、172.16–31.x）豁免以兼容自建网关与 Ollama。
 - 修掉有道在线释义里一处漏转义的插值（`g.pos` 直接来自接口响应）。
+- API Key 与欧路 Token 输入框补充说明：会明文写入 `data.json` 并可能随同步外传。
 
 ### 修复
 
