@@ -429,7 +429,7 @@ export class LookupPanel {
 		if (!this.root.contains(t)) this.hide();
 	};
 
-	/** Esc 关闭（capture 阶段：焦点在 CM6 / iframe 时也能先截获，再由 hide() 归还焦点） */
+	/** Esc 关闭（capture 阶段：焦点在 CM6 时也能先截获；iframe 内焦点由 bindIframeKeys 处理） */
 	private escCloseHandler = (e: KeyboardEvent): void => {
 		if (e.key !== "Escape" || !this.shown) return;
 		// 若焦点在输入框，让输入框自己的 Esc 逻辑先走（清空输入），不要提前 hide
@@ -946,6 +946,7 @@ export class LookupPanel {
 		this.updateScrollbar();
 		// 词典内容高度自适应：iframe 撑到内容实际高度，全文统一由 inner 滚动查看
 		this.iframe.onload = () => {
+			this.bindIframeKeys();
 			try {
 				const docEl = this.iframe.contentDocument?.scrollingElement;
 				if (!docEl) return;
@@ -958,6 +959,50 @@ export class LookupPanel {
 				/* 跨域/异常时忽略 */
 			}
 		};
+	}
+
+	/**
+	 * iframe 是独立文档，内部按键不会冒泡到外层 document。
+	 * 每次 srcdoc 加载后在其文档上监听 keydown：
+	 * - Esc：直接关闭面板
+	 * - 含修饰键的组合（Ctrl/Meta/Alt+…）：转发合成事件到外层 document，
+	 *   让 Obsidian 命令热键（收藏 / 发音 / 关闭面板等）在 iframe 聚焦时同样触发。
+	 * 常见编辑键（复制/全选/粘贴/撤销等）不转发，保留 iframe 内原有行为。
+	 */
+	private bindIframeKeys(): void {
+		const doc = this.iframe.contentDocument;
+		if (!doc) return;
+		const skip = new Set(["c", "a", "v", "x", "z", "y"]);
+		doc.addEventListener(
+			"keydown",
+			(e) => {
+				if (e.key === "Escape") {
+					e.preventDefault();
+					e.stopPropagation();
+					if (this.shown) this.hide();
+					return;
+				}
+				if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+				if (!(e.ctrlKey || e.metaKey || e.altKey)) return;
+				const k = e.key.toLowerCase();
+				if ((e.ctrlKey || e.metaKey) && !e.shiftKey && skip.has(k)) return;
+				e.preventDefault();
+				e.stopPropagation();
+				document.dispatchEvent(
+					new KeyboardEvent("keydown", {
+						key: e.key,
+						code: e.code,
+						ctrlKey: e.ctrlKey,
+						metaKey: e.metaKey,
+						shiftKey: e.shiftKey,
+						altKey: e.altKey,
+						bubbles: true,
+						cancelable: true,
+					}),
+				);
+			},
+			true,
+		);
 	}
 
 	/** 右侧细进度条：inner 整体滚动进度（词典全文 + AI 回答统一滚动） */

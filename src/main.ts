@@ -91,6 +91,9 @@ export default class LinguaNexPlugin extends Plugin {
 		this.addRibbonIcon("book-open-check", "LinguaNex 查词", () =>
 			this.ensurePanel().toggle(),
 		);
+		this.addRibbonIcon("circle-x", "LinguaNex 关闭查词面板", () => {
+			if (this.panel?.visible) this.panel.hide();
+		});
 
 		this.addCommand({
 			id: "lookup-word",
