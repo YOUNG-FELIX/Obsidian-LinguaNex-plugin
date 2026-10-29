@@ -889,14 +889,6 @@
 	transform: scale(0.99);
 }
 
-.lx-review-word {
-	font-size: 26px;
-	font-weight: 700;
-	letter-spacing: 0.3px;
-	color: var(--lx-accent);
-	margin-bottom: 10px;
-}
-
 .lx-review-def {
 	font-size: 13px;
 	line-height: 1.7;
@@ -1713,10 +1705,12 @@ body.lingua-nex-panel-open {
 	transform: translateX(6px);
 }
 .lx-review-word {
-	font-size: 22px;
+	font-size: 1.6em;
 	font-weight: 700;
+	letter-spacing: 0.3px;
 	color: var(--lx-accent);
-	/* 行内流动，长词自动换行，不再被浮动/绝对定位元素遮挡 */
+	margin-bottom: 10px;
+	/* 行内流动，长词自动换行，不被浮动/绝对定位元素遮挡 */
 	max-width: 100%;
 	overflow-wrap: break-word;
 }
@@ -1899,11 +1893,6 @@ body.lingua-nex-panel-open {
 	font-size: 0.78em;
 	color: var(--text-muted);
 }
-.lx-review-word {
-	font-size: 1.6em;
-	font-weight: 700;
-}
-
 /* ---------- 设置页帮助抽屉：从下往上弹出，约 60% 屏高，列表滑动查看 ---------- */
 .lx-help-backdrop {
 	position: fixed;

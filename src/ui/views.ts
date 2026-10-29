@@ -477,9 +477,20 @@ export class VocabReviewView extends ItemView {
 						`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
 						`${proficiencyLabel(e)} · ${dueLabel(e)}`,
 				});
-				// 列表每行右上角笔记区：预览 2~3 行可滑动，长按/双击进入编辑
-				// entries 已在内存中，直接把 note 传进去，避免 N 次重复读文件
-				makeNoteBox(this.plugin, noteSlot).attach(book, e.word, e.note);
+				// 列表每行右上角笔记区：预览 2~3 行可滑动，长按/双击进入编辑。
+				// 笔记区进入视口前延迟创建（IntersectionObserver），进一步降低批量挂载成本。
+				noteSlot.addClass("lx-note-pending");
+				const noteObserver = new IntersectionObserver(
+					(entries, obs) => {
+						if (entries.some((en) => en.isIntersecting)) {
+							noteSlot.removeClass("lx-note-pending");
+							makeNoteBox(this.plugin, noteSlot).attach(book, e.word, e.note);
+							obs.disconnect();
+						}
+					},
+					{ root: scroll, rootMargin: "240px 0px" },
+				);
+				noteObserver.observe(row);
 				const defToggle = row.createEl("button", {
 					cls: "lx-def-toggle",
 					text: "释义 ▾",
