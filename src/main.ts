@@ -6,6 +6,7 @@ import process from "process";
 (globalThis as unknown as Record<string, unknown>).process = process;
 
 import { Plugin } from "obsidian";
+import { setDebugLogging } from "./core/debugLog";
 import {
 	DEFAULT_SETTINGS,
 	LinguaNexSettings,
@@ -113,6 +114,8 @@ export default class LinguaNexPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		// 调试模式：日志仅内存，开启时记录关键路径，关闭即清空
+		setDebugLogging(this.settings.debug?.panel === true);
 		// 生词本存放在 vault 内固定目录，便于 Obsidian Sync / Git 同步；旧插件目录作为一次性搬迁来源
 		this.vocab = new VocabStore(this.app.vault, VOCAB_ROOT, this.manifest.dir ?? "");
 		await this.vocab.ensureBase();
@@ -268,6 +271,12 @@ export default class LinguaNexPlugin extends Plugin {
 			const v = leaf.view as { reload?: () => void } | null;
 			v?.reload?.();
 		}
+	}
+
+	/** 设置页「调试模式」开关入口：同步日志开关并懒创建面板挂/卸调试台 */
+	setPanelDebug(on: boolean): void {
+		setDebugLogging(on);
+		this.ensurePanel().setDebugOverlay(on);
 	}
 
 	/**

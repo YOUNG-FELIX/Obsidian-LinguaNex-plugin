@@ -1,7 +1,7 @@
 {
   "id": "lingua-nex",
   "name": "LinguaNex",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "minAppVersion": "1.4.0",
   "description": "Look up words in local MDX/MDD dictionaries, build vocabulary lists, and review with spaced repetition on desktop and mobile.",
   "author": "Felix·Marvis",

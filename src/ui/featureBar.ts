@@ -1,5 +1,7 @@
 import type LinguaNexPlugin from "../main";
 import { extractSoundPath } from "../core/audio";
+import { snapSelectionToWord } from "../core/wordSnap";
+import { dlog } from "../core/debugLog";
 
 // 选区长度不做上限：长难句、整段文本都可直接选中触发工具条（原 128 字符限制过短）
 
@@ -73,7 +75,7 @@ export class FeatureBar {
 		if (sel.anchorNode && this.plugin.panelEl.contains(sel.anchorNode)) {
 			return "";
 		}
-		const text = sel.toString().trim();
+		const text = (snapSelectionToWord(sel) ?? sel.toString()).trim();
 		// 不做长度/换行限制：长难句、整段文本都可触发（面板内选区已在上面排除）
 		if (!text) return "";
 		return text;
@@ -92,6 +94,7 @@ export class FeatureBar {
 		// 缓存选中词与位置：按钮点击时选区可能已被系统菜单清空，必须在此落值
 		this.lastWord = w;
 		this.lastRect = rect;
+		dlog("fbar", `选中 "${w.length > 60 ? w.slice(0, 60) + "…" : w}"`);
 		// 开启「选中自动查词」：直接按当前模式查词并收起工具条，不展示按钮
 		if (this.plugin.settings.lookup.autoLookup) {
 			const now = Date.now();

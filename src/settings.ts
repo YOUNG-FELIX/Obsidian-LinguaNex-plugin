@@ -135,8 +135,6 @@ export interface LinguaNexSettings {
 	pdf: {
 		/** PDF 阅读器 textLayer 内双击查词 */
 		lookupEnabled: boolean;
-		/** PDF 阅读器选区右键菜单（查词/生词本/AI） */
-		contextMenu: boolean;
 	};
 	eudic: {
 		enabled: boolean;
@@ -150,6 +148,10 @@ export interface LinguaNexSettings {
 	/** 密钥持久化策略：关闭后所有密钥只存内存，不写入 data.json */
 	security: {
 		persistSecrets: boolean;
+	};
+	/** 调试：面板键盘贴合诊断浮层（排查移动端键盘避让问题用） */
+	debug: {
+		panel: boolean;
 	};
 }
 
@@ -219,7 +221,6 @@ export const DEFAULT_SETTINGS: LinguaNexSettings = {
 	},
 	pdf: {
 		lookupEnabled: true,
-		contextMenu: true,
 	},
 	eudic: {
 		enabled: false,
@@ -231,6 +232,9 @@ export const DEFAULT_SETTINGS: LinguaNexSettings = {
 	security: {
 		// 默认落盘；关闭后 AI Key 与欧路 Token 只存内存
 		persistSecrets: true,
+	},
+	debug: {
+		panel: false,
 	},
 };
 
@@ -652,18 +656,6 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.pdf.lookupEnabled)
 					.onChange(async (v) => {
 						this.plugin.settings.pdf.lookupEnabled = v;
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName("PDF 选区右键菜单")
-			.setDesc("在 PDF 中选中英文后右键弹出菜单：查词 / 加入生词本 / AI 翻译 / AI 详解")
-			.addToggle((t) =>
-				t
-					.setValue(this.plugin.settings.pdf.contextMenu)
-					.onChange(async (v) => {
-						this.plugin.settings.pdf.contextMenu = v;
 						await this.plugin.saveSettings();
 					}),
 			);
@@ -1219,7 +1211,7 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 		list([
 			"选中单词后点工具条「查词」：抽屉模式打开顶部面板，悬浮窗模式在单词旁弹出卡片。",
 			"发音优先级：词典内置音频（mdd）→ 有道在线发音 → 系统 TTS（需在设置中开启）。",
-			"PDF 内查词：在 PDF 阅读器中双击单词或右键菜单即可触发，需先在设置中开启「PDF 查词」。",
+			"PDF 内查词：在 PDF 阅读器中双击单词即可触发，需先在设置中开启「PDF 查词」；选中单词后也可用选中取词功能条。",
 			"悬浮窗内滚动内容时，顶部栏会自动上滑收起腾出空间；点击面板外空白或右上角 ✕ 即可关闭。",
 		]);
 
@@ -1237,6 +1229,25 @@ export class LinguaNexSettingTab extends PluginSettingTab {
 			"重新打开 Obsidian 时面板闪现：面板默认不再预渲染触发，只有查词时才弹出，不会再闪。",
 			"复习列表为空：生词按 SM-2 算法排期，新收藏词通常在次日才进入到期队列，属正常现象。",
 		]);
+
+		// 调试区：固定放在设置页最后，<details> 默认折叠，避免干扰正常设置
+		const dbgDetails = containerEl.createEl("details", { cls: "lx-debug-details" });
+		dbgDetails.createEl("summary", { text: "调试（排查问题时展开，默认折叠）" });
+		new Setting(dbgDetails)
+			.setName("调试模式")
+			.setDesc(
+				"开启后查词面板左上角显示调试台：实时指标 + 滚动日志（查词、键盘避让、选区等关键路径），" +
+				"日志支持滑动查看与一键复制，仅保存在内存中、不写盘、不上传；关闭开关即清空。排查问题时开启，反馈日志后关闭即可。",
+			)
+			.addToggle((t) =>
+				t
+					.setValue(this.plugin.settings.debug?.panel === true)
+					.onChange(async (v) => {
+						this.plugin.settings.debug = { panel: v };
+						await this.plugin.saveSettings();
+						this.plugin.setPanelDebug(v);
+					}),
+			);
 	}
 
 	/** AI 连通性检查：请求 /models 列表验证 Base URL + API Key */

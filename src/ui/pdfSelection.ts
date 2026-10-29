@@ -1,16 +1,19 @@
 /**
  * LinguaNex - PDF Selection Handler
- * 双击 PDF（pdf.js textLayer）查词 + 选区右键菜单（查词/生词本/AI 翻译/AI 详解）。
+ * 双击 PDF（pdf.js textLayer）查词。
  *
  * 移植自 fleurdict(MIT) pdf-selection-handler.ts，适配 LinguaNex 现有管线：
  * - 双击查词复用 plugin.lookupFromSelection(word, rect)，自动按 drawer/hover 模式路由
- * - 右键菜单项复用 plugin.favWord / plugin.aiTranslateText / plugin.aiExplainText
  * - 选区守卫：Obsidian PDF 阅读器在弹层聚焦时会清空 DOM 选区，用 savedRange 在
  *   selectionchange 时立即恢复，保持高亮驻留。
+ *
+ * v0.11.2 起移除 PDF 选区右键/长按菜单（三端）：移动端长按选中会触发 contextmenu，
+ * Obsidian Menu 渲染为底部抽屉遮挡功能条；选词后功能条已覆盖全部操作。
  */
 
-import { Menu } from "obsidian";
 import type LinguaNexPlugin from "../main";
+import { snapSelectionToWord } from "../core/wordSnap";
+import { dlog } from "../core/debugLog";
 
 export class PdfSelectionHandler {
 	private plugin: LinguaNexPlugin;
@@ -29,11 +32,6 @@ export class PdfSelectionHandler {
 		// 双击 PDF textLayer 触发查词（capture 阶段，确保 pdf.js 的文本层先经过我们）
 		this.plugin.registerDomEvent(document, "dblclick", (evt: MouseEvent) => {
 			this.handleDblClick(evt);
-		}, true);
-
-		// 右键 PDF 选区打开 LinguaNex 菜单（独立开关，与双击查词互不影响）
-		this.plugin.registerDomEvent(document, "contextmenu", (evt: MouseEvent) => {
-			this.handleContextMenu(evt);
 		}, true);
 	}
 
@@ -55,9 +53,12 @@ export class PdfSelectionHandler {
 		if (!textLayer) return;
 
 		const selection = window.getSelection();
-		const raw = selection?.toString() || "";
+		// pdf.js textLayer 按 span 切割文本，选区边界不吸附单词：
+		// 先词边界吸附（找回丢掉的字母、剥掉误带括号），再走常规清洗
+		const raw = (selection ? snapSelectionToWord(selection) : null) ?? selection?.toString() ?? "";
 		const word = this.normalizePdfSelection(raw);
 		if (!word) return;
+		dlog("pdf", `双击查词 "${word}"（原始选区 "${selection?.toString().trim().slice(0, 40) ?? ""}"）`);
 
 		// 保存选区，PDF 阅读器弹层聚焦清空选区时可恢复
 		this.savedRange = selection && selection.rangeCount > 0
@@ -70,94 +71,6 @@ export class PdfSelectionHandler {
 		if (!rect || (rect.width === 0 && rect.height === 0)) return;
 
 		void this.lookupWord(word, rect);
-	}
-
-	private handleContextMenu(evt: MouseEvent): void {
-		// 独立开关：仅受「PDF 右键菜单」控制。关闭时原地返回，不拦截原生菜单。
-		if (!this.plugin.settings.pdf?.contextMenu) return;
-
-		const target = evt.target as HTMLElement | null;
-		if (!target) return;
-
-		// 忽略面板内右键
-		if (target.closest(".lx-panel") || target.closest(".lx-floating")) return;
-
-		const textLayer = target.closest(".textLayer");
-		if (!textLayer) return;
-
-		const selection = window.getSelection();
-		const raw = selection?.toString() || "";
-		const normalized = this.normalizePdfSelection(raw);
-		if (!normalized) return; // 无英文选区——交给 Obsidian 原生菜单
-
-		evt.preventDefault();
-		evt.stopPropagation();
-
-		// 查词用单词/短语；AI 翻译/详解用整段选区
-		const match = normalized.match(/[a-zA-Z][a-zA-Z'\-\s,;:!?]*[a-zA-Z']?/);
-		const cleanWord = (match ? match[0] : normalized).trim();
-		const fullSelection = raw.trim();
-
-		// 菜单打开期间保持选区高亮
-		this.savedRange = selection && selection.rangeCount > 0
-			? selection.getRangeAt(0).cloneRange()
-			: null;
-		this.startSelectionGuard();
-
-		const menu = new Menu();
-		menu.addSeparator();
-
-		menu.addItem((item) => {
-			item
-				.setTitle("LinguaNex 查词")
-				.setIcon("book-open")
-				.onClick(() => {
-					const r = this.savedRange;
-					this.stopSelectionGuard();
-					if (r) this.restoreSavedSelection();
-					const sel = window.getSelection();
-					const rect = sel && sel.rangeCount > 0
-						? sel.getRangeAt(0).getBoundingClientRect()
-						: null;
-					if (rect && rect.width > 0 && rect.height > 0) {
-						void this.lookupWord(cleanWord, rect);
-					}
-				});
-		});
-
-		menu.addItem((item) => {
-			item
-				.setTitle("加入生词本")
-				.setIcon("bookmark")
-				.onClick(() => {
-					this.stopSelectionGuard();
-					void this.plugin.favWord(cleanWord);
-				});
-		});
-
-		menu.addItem((item) => {
-			item
-				.setTitle("AI 翻译")
-				.setIcon("languages")
-				.onClick(() => {
-					// 关闭守卫避免与 AI 面板抢选区
-					this.stopSelectionGuard();
-					void this.plugin.aiTranslateText(fullSelection);
-				});
-		});
-
-		menu.addItem((item) => {
-			item
-				.setTitle("AI 详解")
-				.setIcon("sparkles")
-				.onClick(() => {
-					this.stopSelectionGuard();
-					void this.plugin.aiExplainText(fullSelection);
-				});
-		});
-
-		menu.addSeparator();
-		menu.showAtMouseEvent(evt);
 	}
 
 	/**

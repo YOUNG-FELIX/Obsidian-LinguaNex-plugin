@@ -26,8 +26,9 @@ LinguaNex 是 Obsidian 插件，受平台能力约束，以下几点属于**已�
 1. **密钥无法加密存储。** Obsidian 不提供系统钥匙串 API，插件只能写 vault 内文件，因此 AI API Key 与欧路 Token 默认以明文存在
    `<vault>/.obsidian/plugins/lingua-nex/data.json`。该文件**可能随 Obsidian Sync / Git 一起同步**。
    缓解方式：设置 → 隐私与安全 → 关闭「持久化保存密钥」，密钥将只存于内存、不写盘。
-2. **不校验词典文件来源。** `.mdx` 由用户自行获取。插件会对注入的释义 HTML 做消毒（剥离脚本、事件属性、伪协议 URL），
-   但仍建议只使用来源可信的词典。
+2. **不校验词典文件来源。** `.mdx` 由用户自行获取。自 v0.11.2 起本地词典以**信任模式**渲染（保留内联脚本，
+   柯林斯等词典的"点击展开释义"等交互依赖脚本才能工作）。请务必只加载来源可信的词典文件：
+   恶意 .mdx 中的脚本理论上可以访问 Obsidian 环境。
 3. **在线查词会向第三方接口发送查询词。** 有道 / Free Dictionary / 翻译引擎 / 你配置的 AI 服务都会收到你查的词。
    介意的话请只使用离线词典。
 
@@ -35,7 +36,7 @@ LinguaNex 是 Obsidian 插件，受平台能力约束，以下几点属于**已�
 
 | 层面 | 措施 |
 | --- | --- |
-| 注入 | 词典与在线 HTML 注入 `srcdoc` iframe 前统一消毒（`src/core/sanitize.ts`），剥离 `<script>`、内联 `on*=` 事件、`javascript:` / `data:text/html` 伪协议、`iframe/object/embed/form/base` |
+| 注入 | 在线源（有道 / Free Dictionary / 翻译）HTML 注入 `srcdoc` iframe，不附带可执行脚本；本地 .mdx 词典自 v0.11.2 起为信任模式（保留脚本以支持词典内交互，见上方已知限制第 2 条） |
 | 传输 | API Base URL 为非本地/内网的明文 `http` 时拒绝请求，避免密钥在明文链路裸奔 |
 | 持久化 | 「持久化保存密钥」开关，关闭后写盘副本中清空 AI API Key 与欧路 Token |
 | 遥测 | 无任何遥测、无埋点；除你自己配置的词典与 AI 服务外不发起任何外部请求 |

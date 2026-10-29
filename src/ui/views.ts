@@ -427,7 +427,12 @@ export class VocabReviewView extends ItemView {
 		renderMode();
 	}
 
-	/** 列表模式：词条一行一条，释义按钮展开/收起，可切换本地/有道/AI 源 */
+	/** 列表模式：词条一行一条，释义按钮展开/收起，可切换本地/有道/AI 源
+	 *
+	 * 性能：行结构较重（发音+笔记区+释义面板+操作按钮），生词多时一次性
+	 * 全量渲染会卡顿。改为固定高度滚动容器 + 分批渲染（每批 40 条），
+	 * 滚动接近底部时再挂载下一批，打开视图只付首屏成本。
+	 */
 	private async renderList(root: HTMLElement, book: string): Promise<void> {
 		// 按复习算法排序：该复习的在前（已到期/未安排），再按到期时间由近到远
 		const entries = sortByDue(await this.plugin.vocab.entries(book));
@@ -438,95 +443,111 @@ export class VocabReviewView extends ItemView {
 			});
 			return;
 		}
-		const list = root.createDiv({ cls: "lx-word-list" });
+		// 固定高度滚动容器：列表在容器内滑动，页面其余部分（工具栏等）不动
+		const scroll = root.createDiv({ cls: "lx-list-scroll" });
+		const list = scroll.createDiv({ cls: "lx-word-list" });
 		// 上一个已评级未沉底的词行：等下一个词评级时再沉底轮转（避免释义还没看就移走）
 		let prevRow: HTMLElement | null = null;
-		for (const e of entries) {
-			const row = list.createDiv({ cls: "lx-word-row" });
-			const head = row.createDiv({ cls: "lx-word-head" });
-			// 行首一行：发音 + 单词 + 已学标签（左） 与 笔记区（右上角）
-			const line1 = head.createDiv({ cls: "lx-word-line1" });
-			const speak = line1.createEl("button", {
-				cls: "lx-icon-btn lx-speak",
-				text: "🔊",
-			});
-			speak.title = "发音";
-			speak.addEventListener("click", (ev) => {
-				ev.stopPropagation();
-				void this.plugin.speakWord(e.word);
-			});
-			line1.createSpan({ cls: "lx-word", text: e.word });
-			if ((e.reviewCount ?? 0) > 0) {
-				line1.createSpan({ cls: "lx-learned", text: "✓ 已学" });
-			}
-			const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
-			head.createDiv({
-				cls: "lx-word-meta",
-				text:
-					`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
-					`${proficiencyLabel(e)} · ${dueLabel(e)}`,
-			});
-			// 列表每行右上角笔记区：预览 2~3 行可滑动，长按/双击进入编辑
-			// entries 已在内存中，直接把 note 传进去，避免 N 次重复读文件
-			makeNoteBox(this.plugin, noteSlot).attach(book, e.word, e.note);
-			const defToggle = row.createEl("button", {
-				cls: "lx-def-toggle",
-				text: "释义 ▾",
-			});
-			const defHost = row.createDiv({ cls: "lx-def-host" });
-			const panel = makeDefPanel(this.plugin, defHost, e);
-			let open = false;
-			defToggle.addEventListener("click", () => {
-				open = !open;
-				defHost.toggleClass("open", open);
-				defToggle.setText(open ? "收起释义 ▴" : "释义 ▾");
-				if (open) void panel.load("local");
-			});
-			const ops = row.createDiv({ cls: "lx-word-ops" });
-			for (const [g, label] of [
-				[0, "忘记"],
-				[1, "模糊"],
-				[2, "认识"],
-			] as const) {
-				const btn = ops.createEl("button", {
-					cls: "lx-rbtn mini",
-					text: label,
+		const BATCH = 40;
+		const renderBatch = (from: number): number => {
+			const end = Math.min(from + BATCH, entries.length);
+			for (let i = from; i < end; i++) {
+				const e = entries[i];
+				const row = list.createDiv({ cls: "lx-word-row" });
+				const head = row.createDiv({ cls: "lx-word-head" });
+				// 行首一行：发音 + 单词 + 已学标签（左） 与 笔记区（右上角）
+				const line1 = head.createDiv({ cls: "lx-word-line1" });
+				const speak = line1.createEl("button", {
+					cls: "lx-icon-btn lx-speak",
+					text: "🔊",
 				});
-				btn.addEventListener("click", async () => {
-					const updated = applyRating(e, g, this.reviewCfg);
-					await this.plugin.vocab.update(book, e.word, updated);
-					// 评级后自动展开释义，方便核对；不重绘、不移位，保留当前行位置
-					open = true;
-					defHost.addClass("open");
-					defToggle.setText("收起释义 ▴");
-					void panel.load("local");
-					// 上一个已评级词沉底轮转（学过词进入循环队列），带卡片同款轻位移动画
-					if (prevRow && prevRow.isConnected) {
-						list.appendChild(prevRow);
-						prevRow.removeClass("pop");
-						void prevRow.offsetWidth; // 强制 reflow 重触发过渡
-						prevRow.addClass("pop");
-					}
-					prevRow = row;
+				speak.title = "发音";
+				speak.addEventListener("click", (ev) => {
+					ev.stopPropagation();
+					void this.plugin.speakWord(e.word);
 				});
+				line1.createSpan({ cls: "lx-word", text: e.word });
+				if ((e.reviewCount ?? 0) > 0) {
+					line1.createSpan({ cls: "lx-learned", text: "✓ 已学" });
+				}
+				const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
+				head.createDiv({
+					cls: "lx-word-meta",
+					text:
+						`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
+						`${proficiencyLabel(e)} · ${dueLabel(e)}`,
+				});
+				// 列表每行右上角笔记区：预览 2~3 行可滑动，长按/双击进入编辑
+				// entries 已在内存中，直接把 note 传进去，避免 N 次重复读文件
+				makeNoteBox(this.plugin, noteSlot).attach(book, e.word, e.note);
+				const defToggle = row.createEl("button", {
+					cls: "lx-def-toggle",
+					text: "释义 ▾",
+				});
+				const defHost = row.createDiv({ cls: "lx-def-host" });
+				const panel = makeDefPanel(this.plugin, defHost, e);
+				let open = false;
+				defToggle.addEventListener("click", () => {
+					open = !open;
+					defHost.toggleClass("open", open);
+					defToggle.setText(open ? "收起释义 ▴" : "释义 ▾");
+					if (open) void panel.load("local");
+				});
+				const ops = row.createDiv({ cls: "lx-word-ops" });
+				for (const [g, label] of [
+					[0, "忘记"],
+					[1, "模糊"],
+					[2, "认识"],
+				] as const) {
+					const btn = ops.createEl("button", {
+						cls: "lx-rbtn mini",
+						text: label,
+					});
+					btn.addEventListener("click", async () => {
+						const updated = applyRating(e, g, this.reviewCfg);
+						await this.plugin.vocab.update(book, e.word, updated);
+						// 评级后自动展开释义，方便核对；不重绘、不移位，保留当前行位置
+						open = true;
+						defHost.addClass("open");
+						defToggle.setText("收起释义 ▴");
+						void panel.load("local");
+						// 上一个已评级词沉底轮转（学过词进入循环队列），带卡片同款轻位移动画
+						if (prevRow && prevRow.isConnected) {
+							list.appendChild(prevRow);
+							prevRow.removeClass("pop");
+							void prevRow.offsetWidth; // 强制 reflow 重触发过渡
+							prevRow.addClass("pop");
+						}
+						prevRow = row;
+					});
+				}
+				const rm = ops.createEl("button", {
+					cls: "lx-rbtn mini danger",
+					text: "移除",
+				});
+				rm.addEventListener("click", () => {
+					new ConfirmModal(
+						this.app,
+						this.plugin,
+						"移除生词",
+						`确定从「${book}」移除「${e.word}」吗？`,
+						async () => {
+							await this.plugin.vocab.remove(book, e.word);
+							this.render();
+						},
+					).open();
+			});
 			}
-			const rm = ops.createEl("button", {
-				cls: "lx-rbtn mini danger",
-				text: "移除",
-			});
-			rm.addEventListener("click", () => {
-				new ConfirmModal(
-					this.app,
-					this.plugin,
-					"移除生词",
-					`确定从「${book}」移除「${e.word}」吗？`,
-					async () => {
-						await this.plugin.vocab.remove(book, e.word);
-						this.render();
-					},
-				).open();
-			});
-		}
+			return end;
+		};
+		let cursor = renderBatch(0);
+		// 滚动接近底部时挂载下一批：打开视图只付首屏 40 条的渲染成本
+		scroll.addEventListener("scroll", () => {
+			if (cursor >= entries.length) return;
+			if (scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 800) {
+				cursor = renderBatch(cursor);
+			}
+		});
 		// 列表底部：折叠的算法参数设置（可配置复习计划与参数）
 		this.renderAlgoSettings(root);
 	}
@@ -552,13 +573,14 @@ export class VocabReviewView extends ItemView {
 		// 按复习算法排序：该复习的在前，再按到期时间由近到远
 		const deck = sortByDue(entries);
 		const card = root.createDiv({ cls: "lx-review-card" });
-		// 发音按钮固定在卡片左上角：长单词换行时不再被行内流挤到右侧、与右上角笔记区重叠
-		const speak = card.createEl("button", {
+		// 发音按钮内嵌在单词行内（词前），随内容流动，不绝对定位遮挡单词
+		const wordLine = card.createDiv({ cls: "lx-card-wordline" });
+		const speak = wordLine.createEl("button", {
 			cls: "lx-icon-btn lx-speak lx-card-speak",
 			text: "🔊",
 		});
 		speak.title = "发音";
-		const wordEl = card.createEl("div", { cls: "lx-review-word" });
+		const wordEl = wordLine.createEl("div", { cls: "lx-review-word" });
 		const metaEl = card.createEl("div", { cls: "lx-review-meta" });
 		const defToggle = card.createEl("button", {
 			cls: "lx-def-toggle",
@@ -776,11 +798,45 @@ export class VocabReviewView extends ItemView {
 		let year = now.getFullYear();
 		let month = now.getMonth(); // 0-based
 
-		// 头部：年月切换
+		// 头部：年月切换 + 点年月标签弹原生日期选择器（快速跳转任意月份）
 		const head = wrap.createDiv({ cls: "lx-hm-head" });
 		const prevBtn = head.createEl("button", { cls: "lx-hm-nav", text: "‹" });
 		const monthLabel = head.createEl("span", { cls: "lx-hm-label" });
+		monthLabel.title = "点击弹出日期选择器，快速跳转任意月份";
 		const nextBtn = head.createEl("button", { cls: "lx-hm-nav", text: "›" });
+		// 原生日期选择器：CSS 尺寸归零隐藏（display:none 会让 showPicker 失效）
+		const dateInput = head.createEl("input", {
+			cls: "lx-hm-date-input",
+			attr: { type: "date" },
+		});
+		const shrinkInput = (): void => {
+			dateInput.style.width = "";
+			dateInput.style.opacity = "";
+		};
+		monthLabel.addEventListener("click", () => {
+			dateInput.value = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+			try {
+				dateInput.showPicker();
+			} catch {
+				// WebView 不支持 showPicker：临时展开输入框让用户手动点开
+				dateInput.style.width = "140px";
+				dateInput.style.opacity = "1";
+				dateInput.focus();
+			}
+		});
+		dateInput.addEventListener("change", () => {
+			const v = dateInput.value; // yyyy-mm-dd
+			if (v) {
+				const [y, m] = v.split("-");
+				if (y && m) {
+					year = Number(y);
+					month = Number(m) - 1;
+					void render();
+				}
+			}
+			shrinkInput();
+		});
+		dateInput.addEventListener("blur", () => shrinkInput());
 
 		// 星期表头
 		const weekdayRow = wrap.createDiv({ cls: "lx-hm-weekdays" });

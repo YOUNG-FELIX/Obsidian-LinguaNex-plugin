@@ -1,11 +1,11 @@
-import { MarkdownRenderer, Component, MarkdownView, type Editor, type EditorPosition } from "obsidian";
+import { MarkdownRenderer, Component, MarkdownView, Platform, type Editor, type EditorPosition } from "obsidian";
 import type LinguaNexPlugin from "../main";
 import type { LinguaNexMdict } from "../core/mdict";
 import type { DictResources } from "../core/resources";
 import { aiLookupStream, type AIConfig, type ChatMessage } from "../core/ai";
 import { playAudioUrl, playMddAudio, speakTTS, extractSoundPath } from "../core/audio";
-import { sanitizeDictHtml } from "../core/sanitize";
 import { type YoudaoEntry } from "../core/onlineDict";
+import { dlog, getDebugLog, onDebugLog } from "../core/debugLog";
 
 export interface LookupSource {
 	id: string;
@@ -270,6 +270,202 @@ export class LookupPanel {
 		this.contentInner.addEventListener("scroll", () => this.onInnerScroll());
 		// 点击面板外部遮罩自动收回
 		this.backdrop.addEventListener("click", () => this.hide());
+		// 软键盘贴合：visualViewport 收缩（移动端键盘弹出）时压缩面板，
+		// 让面板下沿实时贴住键盘上沿，笔记浮层/追问条随面板整体不被遮挡
+		if (window.visualViewport) {
+			window.visualViewport.addEventListener("resize", this.onVvResizeEv);
+			window.visualViewport.addEventListener("scroll", this.onVvScrollEv);
+		}
+		window.addEventListener("resize", this.onWinResizeEv);
+		// 兜底：部分旧 WebView 的 visualViewport 事件不可靠，
+		// 输入框聚焦期间轮询可视高度，确保键盘动画结束后也能贴合
+		this.root.addEventListener("focusin", (e) => {
+			const t = e.target as HTMLElement;
+			if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA") return;
+			dlog("panel", `focusin ${t.tagName}`);
+			this.startKbPoll();
+		});
+		this.root.addEventListener("focusout", () => {
+			// 延迟停轮询：焦点可能转到面板内另一个输入框；同时做一次最终贴合
+			window.setTimeout(() => {
+				this.onViewportResize("focusout");
+				const ae = document.activeElement as HTMLElement | null;
+				if (!ae || !this.root.contains(ae) ||
+					(ae.tagName !== "INPUT" && ae.tagName !== "TEXTAREA")) {
+					this.stopKbPoll();
+				}
+			}, 300);
+		});
+		// 设置里可能已开着诊断浮层（重启插件后恢复）
+		if (this.plugin.settings.debug?.panel) this.setDebugOverlay(true);
+	}
+
+	/** 诊断计数：验证各事件通道在设备上是否真的触发 */
+	private dbgCounts = { vvResize: 0, vvScroll: 0, winResize: 0, poll: 0 };
+	private debugEl: HTMLElement | null = null;
+	private debugMetricsEl: HTMLElement | null = null;
+	private debugLogEl: HTMLElement | null = null;
+	private debugUnsub: (() => void) | null = null;
+
+	private onVvResizeEv = (): void => {
+		this.dbgCounts.vvResize++;
+		this.onViewportResize("vv.resize");
+	};
+	private onVvScrollEv = (): void => {
+		this.dbgCounts.vvScroll++;
+		this.onViewportResize("vv.scroll");
+	};
+	private onWinResizeEv = (): void => {
+		this.dbgCounts.winResize++;
+		this.onViewportResize("win.resize");
+	};
+
+	/** 设置页「调试模式」开关直推：开则挂调试台，关则移除 */
+	setDebugOverlay(on: boolean): void {
+		if (on && !this.debugEl) {
+			this.debugEl = this.root.createDiv({ cls: "lx-debug" });
+			this.debugEl.style.cssText =
+				"position:absolute;left:6px;top:6px;z-index:99;" +
+				"background:rgba(0,0,0,0.85);color:#7fff9e;font:10px/1.5 monospace;" +
+				"padding:6px 8px;border-radius:8px;width:min(320px,88vw);box-sizing:border-box;";
+			// 实时指标行（只读）
+			this.debugMetricsEl = this.debugEl.createDiv();
+			this.debugMetricsEl.style.cssText =
+				"white-space:pre;pointer-events:none;margin-bottom:4px;";
+			// 日志区：固定高度、可滚动、可选择复制；仅内存不落盘
+			const logBox = this.debugEl.createDiv();
+			logBox.style.cssText =
+				"height:120px;overflow-y:auto;user-select:text;-webkit-user-select:text;" +
+				"white-space:pre-wrap;word-break:break-all;border-top:1px solid #2a4;";
+			this.debugLogEl = logBox;
+			logBox.setText(getDebugLog() || "（暂无日志，操作插件后此处实时输出）");
+			this.debugUnsub = onDebugLog(() => {
+				if (!this.debugLogEl) return;
+				const atBottom = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 12;
+				this.debugLogEl.setText(getDebugLog());
+				if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+			});
+			// 复制按钮：一键复制全部日志，便于粘贴反馈
+			const copyBtn = this.debugEl.createEl("button", { text: "复制日志" });
+			copyBtn.style.cssText =
+				"margin-top:4px;font:10px monospace;padding:2px 10px;" +
+				"background:#173;color:#7fff9e;border:1px solid #2a4;border-radius:4px;";
+			copyBtn.addEventListener("click", () => {
+				const text = getDebugLog() || "（无日志）";
+				void navigator.clipboard?.writeText(text).then(
+					() => this.plugin.toast.show("调试日志已复制", { key: "lx-debug", duration: 1500 }),
+					() => this.plugin.toast.show("复制失败，请长按日志区手动选择复制", { key: "lx-debug", duration: 2500 }),
+				);
+			});
+			this.onViewportResize("debug-on");
+			dlog("panel", "调试台已挂载");
+		} else if (!on && this.debugEl) {
+			this.debugUnsub?.();
+			this.debugUnsub = null;
+			this.debugEl.remove();
+			this.debugEl = null;
+			this.debugMetricsEl = null;
+			this.debugLogEl = null;
+		}
+	}
+
+	private kbPollTimer: number | null = null;
+
+	private startKbPoll(): void {
+		if (this.kbPollTimer != null) return;
+		this.kbPollTimer = window.setInterval(() => {
+			this.dbgCounts.poll++;
+			this.onViewportResize("poll");
+		}, 250);
+	}
+
+	private stopKbPoll(): void {
+		if (this.kbPollTimer != null) {
+			window.clearInterval(this.kbPollTimer);
+			this.kbPollTimer = null;
+		}
+	}
+
+	/** 键盘弹出导致的高度压缩标记：用于键盘收起后还原用户调整的悬浮高度 */
+	private kbPrevHeight: string | null = null;
+
+	/** 面板内输入框/文本域是否持有焦点（聚焦避让策略的依据） */
+	private isPanelInputFocused(): boolean {
+		const ae = document.activeElement as HTMLElement | null;
+		return !!ae && this.root.contains(ae) &&
+			(ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
+	}
+
+	private lastDockAction = "";
+
+	private onViewportResize = (via = "direct"): void => {
+		const vv = window.visualViewport;
+		let action = "skip:!vv";
+		let occluded = -1;
+		if (vv) {
+			occluded = Math.round(window.innerHeight - (vv.height + vv.offsetTop));
+		}
+		if (vv && this.visible) {
+			// 布局视口与可视视口底部差超过阈值（≈100px）判定为软键盘弹出；
+			// vv.offsetTop 兼容 iOS 键盘弹出时可视区整体下移的场景
+			if (occluded > 100) {
+				const vvBottom = Math.floor(vv.height + vv.offsetTop);
+				// 抽屉形态 top:0 高度自适应：限制 maxHeight 即可让下沿贴键盘上沿
+				const maxH = Math.max(220, vvBottom - 4);
+				this.root.style.maxHeight = `${maxH}px`;
+				action = `dock:${maxH}`;
+				if (this.floating) {
+					// 悬浮形态有内联 height：底部越界时同步压高，键盘收起后还原
+					const rect = this.root.getBoundingClientRect();
+					if (rect.bottom > vvBottom - 2) {
+						if (this.kbPrevHeight == null) {
+							this.kbPrevHeight = this.root.style.height || null;
+						}
+						const h = Math.max(220, vvBottom - 4 - rect.top);
+						this.root.style.height = `${h}px`;
+						this.root.style.maxHeight = `${h}px`;
+						action = `dockF:${h}`;
+					}
+				}
+			} else if (this.isPanelInputFocused() && Platform.isMobile) {
+				// 兜底（实测部分 Android WebView：vv 高度恒定、事件全 0，系统层面
+				// 完全无法感知键盘）——聚焦即避让：输入框聚焦时压到 60% 屏高，
+				// 面板下沿落在常规键盘（约占屏高 30–40%）上沿之上，失焦还原。
+				const maxH = Math.max(260, Math.round(window.innerHeight * 0.6));
+				this.root.style.maxHeight = `${maxH}px`;
+				action = `dockKb:${maxH}`;
+			} else {
+				// 键盘收起：还原（hide() 也会统一清理内联尺寸）
+				this.root.style.removeProperty("maxHeight");
+				action = "idle";
+				if (this.kbPrevHeight != null) {
+					if (this.kbPrevHeight) this.root.style.height = this.kbPrevHeight;
+					else this.root.style.removeProperty("height");
+					this.kbPrevHeight = null;
+				}
+			}
+		} else if (!this.visible) {
+			this.kbPrevHeight = null;
+			action = "skip:hidden";
+		}
+		this.renderDebug(via, occluded, action);
+		if (action !== this.lastDockAction) {
+			this.lastDockAction = action;
+			dlog("panel", `${action} via=${via} occ=${occluded} vv=${vv ? Math.round(vv.height) : "N/A"} inner=${Math.round(window.innerHeight)}`);
+		}
+	};
+
+	/** 诊断台实时指标行：可视区高度 / 遮挡量 / 事件通道计数 / 面板实际位置 */
+	private renderDebug(via: string, occluded: number, action: string): void {
+		if (!this.debugMetricsEl) return;
+		const vv = window.visualViewport;
+		const rect = this.root.getBoundingClientRect();
+		const c = this.dbgCounts;
+		this.debugMetricsEl.setText(
+			`via=${via} ${action} | inner=${Math.round(window.innerHeight)} vv=${vv ? Math.round(vv.height) + "+" + Math.round(vv.offsetTop) : "N/A"} occ=${occluded}\n` +
+			`rect t=${Math.round(rect.top)} b=${Math.round(rect.bottom)} h=${Math.round(rect.height)} | ` +
+			`evt vvR=${c.vvResize} vvS=${c.vvScroll} win=${c.winResize} poll=${c.poll} vis=${this.visible ? 1 : 0}`,
+		);
 	}
 
 	setSources(sources: LookupSource[]): void {
@@ -576,6 +772,7 @@ export class LookupPanel {
 	 */
 	hide(): void {
 		this.shown = false;
+		dlog("panel", "hide");
 		this.currentOnline = null;
 		document.body.removeClass("lingua-nex-panel-open");
 		this.backdrop.removeClass("shown");
@@ -595,6 +792,8 @@ export class LookupPanel {
 		this.root.removeClass("lx-dragging");
 		this.dragState = null;
 		this.resizeState = null;
+		this.kbPrevHeight = null;
+		this.stopKbPoll();
 		this.aiAbort?.abort();
 		this.aiCache.clear();
 		// 收起追问条与笔记浮层，回到干净的初始态
@@ -669,6 +868,7 @@ export class LookupPanel {
 	async lookup(word: string, pushHistory = true, preferDict = false, autoFallback = false): Promise<void> {
 		const w = word.trim();
 		if (!w) return;
+		dlog("lookup", `查词 "${w}" src=${this.activeSourceId}`);
 		if (preferDict) {
 			const dictSrc = this.sources.find((x) => !x.isAI);
 			if (dictSrc) {
@@ -1388,8 +1588,9 @@ export class LookupPanel {
 	 * 覆盖 link/script/img 的 src/href（含 file://、bres:、相对路径）与 sound:/bres: 内嵌引用。
 	 */
 	buildDoc(html: string, mdict: LinguaNexMdict, resources?: DictResources): string {
-		// 入参是第三方 .mdx 的释义 HTML：先消毒再加工，杜绝脚本进入同源 iframe
-		html = sanitizeDictHtml(html);
+		// v0.11.2 起本地 .mdx 采用信任模式：不再剥离 <script>/on* 事件——
+		// 柯林斯等词典的"点击展开释义"等交互依赖内联脚本，消毒会导致内容区完全不可交互。
+		// 风险提示：请勿加载来源不明的 .mdx 文件（详见 SECURITY.md）。
 		const resolve = (raw: string): string | null => {
 			const clean = raw
 				.replace(/^file:\/\/\//i, "")
@@ -1578,6 +1779,14 @@ export class LookupPanel {
 	dispose(): void {
 		this.mdComp?.unload();
 		this.mdComp = null;
+		this.debugUnsub?.();
+		this.debugUnsub = null;
+		if (window.visualViewport) {
+			window.visualViewport.removeEventListener("resize", this.onVvResizeEv);
+			window.visualViewport.removeEventListener("scroll", this.onVvScrollEv);
+		}
+		window.removeEventListener("resize", this.onWinResizeEv);
+		this.stopKbPoll();
 		if (this.statusClearTimer != null) {
 			window.clearTimeout(this.statusClearTimer);
 			this.statusClearTimer = null;

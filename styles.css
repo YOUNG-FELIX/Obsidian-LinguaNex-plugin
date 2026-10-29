@@ -1486,6 +1486,13 @@ body.lingua-nex-panel-open {
 	min-height: 120px;
 }
 
+/* 列表固定高度滚动容器：分批渲染配合，打开视图只付首屏渲染成本 */
+.lx-list-scroll {
+	max-height: min(64vh, 620px);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	border-radius: 8px;
+}
 .lx-word-list {
 	display: flex;
 	flex-direction: column;
@@ -1709,26 +1716,26 @@ body.lingua-nex-panel-open {
 	font-size: 22px;
 	font-weight: 700;
 	color: var(--lx-accent);
-	display: inline-block;
-	margin-right: 8px;
-	/* 给右上角笔记区让位，避免长单词被压 */
-	max-width: 52%;
-	/* 给左上角发音按钮让出位置，长单词换行也不会压到喇叭 */
-	padding-left: 28px;
-	box-sizing: border-box;
+	/* 行内流动，长词自动换行，不再被浮动/绝对定位元素遮挡 */
+	max-width: 100%;
 	overflow-wrap: break-word;
 }
-/* 卡片发音按钮：脱离行内流，钉在左上角 */
+/* 卡片单词行：发音按钮内嵌在词前，随行流动不遮挡 */
+.lx-card-wordline {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+/* 卡片发音按钮：内嵌元素（词前），不再绝对定位 */
 .lx-review-card .lx-card-speak {
-	position: absolute;
-	top: 8px;
-	left: 10px;
-	z-index: 2;
-	float: none;
+	position: static;
+	flex: 0 0 auto;
 	margin: 0;
 	padding: 2px 3px;
 	font-size: 14px;
 	line-height: 1;
+	vertical-align: baseline;
 }
 .lx-review-meta {
 	/* 右侧留给笔记区，文字自然换行不重叠 */
@@ -2149,6 +2156,20 @@ body.lingua-nex-panel-open {
 	font-size: 14px;
 	flex: 1;
 	text-align: center;
+	/* 可点击：提示能弹日期选择器 */
+	cursor: pointer;
+	border-radius: 6px;
+}
+.lx-hm-label:hover {
+	color: var(--lx-accent, var(--interactive-accent));
+}
+/* 隐藏式原生日期输入：点年月标签时弹出系统日期面板 */
+.lx-hm-date-input {
+	width: 0;
+	height: 0;
+	border: none;
+	padding: 0;
+	opacity: 0;
 }
 .lx-hm-weekdays {
 	display: grid;
