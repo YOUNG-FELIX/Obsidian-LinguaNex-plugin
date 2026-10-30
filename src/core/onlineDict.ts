@@ -63,9 +63,12 @@ export class YoudaoAPI {
 	}
 
 	async query(word: string): Promise<YoudaoEntry | null> {
-		const w = word.trim().toLowerCase();
+		const w = word.trim();
 		if (!w) return null;
-		const cached = this.cache.get(w);
+		// 自动双语：含中文字符走汉英（web_trans 网络翻译），否则走英汉（ec）
+		const chinese = /[\u4e00-\u9fff]/.test(w);
+		const cacheKey = (chinese ? "ce:" : "ec:") + w.toLowerCase();
+		const cached = this.cache.get(cacheKey);
 		if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
 			return cached.entry;
 		}
@@ -73,20 +76,48 @@ export class YoudaoAPI {
 		let entry: YoudaoEntry | null = null;
 		try {
 			const dictsParam = encodeURIComponent(
-				JSON.stringify({ count: 99, dicts: [["ec"]] }),
+				JSON.stringify({ count: 99, dicts: [[chinese ? "web_trans" : "ec"]] }),
 			);
-			const url = `https://dict.youdao.com/jsonapi?q=${encodeURIComponent(w)}&le=eng&dicts=${dictsParam}`;
+			const le = chinese ? "ch" : "eng";
+			const url = `https://dict.youdao.com/jsonapi?q=${encodeURIComponent(w)}&le=${le}&dicts=${dictsParam}`;
 			const resp = await httpGet(url);
-			if (resp.status === 200 && resp.json) {				entry = this.parse(resp.json, w);
+			if (resp.status === 200 && resp.json) {
+				entry = chinese ? this.parseCE(resp.json, w) : this.parse(resp.json, w);
 			}
 		} catch (e) {
 			entry = null;
 		}
 
 		if (entry) {
-			this.cache.set(w, { ts: Date.now(), entry });
+			this.cache.set(cacheKey, { ts: Date.now(), entry });
 		}
 		return entry;
+	}
+
+	/** 汉英（中→英）：从 web_trans 网络翻译提取英文对应词，附发音 */
+	private parseCE(data: any, word: string): YoudaoEntry | null {
+		const wt = data?.web_trans?.["web-translation"];
+		if (!Array.isArray(wt) || !wt.length) return null;
+		// key 与输入一致的那条优先（通常第一条即原词）
+		const hit = wt.find((x: any) => x?.key === word) ?? wt[0];
+		const trans = Array.isArray(hit?.trans) ? hit.trans : [];
+		const defs: string[] = [];
+		for (const t of trans) {
+			const v = t?.value;
+			if (typeof v === "string" && v) defs.push(v);
+		}
+		if (!defs.length) return null;
+		const uniq = [...new Set(defs)].slice(0, 12);
+		const firstEn = uniq[0] ?? "";
+		return {
+			word,
+			phoneticBr: null,
+			phoneticUs: null,
+			audioBr: firstEn ? youdaoVoiceUrl(firstEn, 1) : null,
+			audioUs: firstEn ? youdaoVoiceUrl(firstEn, 2) : null,
+			groups: [{ pos: "英文", defs: uniq }],
+			raw: data,
+		};
 	}
 
 	/** 解析有道 jsonapi ec 数据：音标 + dictvoice 发音 + 按词性分组的中文释义 */

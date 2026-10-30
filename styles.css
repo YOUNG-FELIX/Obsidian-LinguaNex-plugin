@@ -452,8 +452,9 @@
 
 .lingua-nex-panel .lx-ai-holder h1,
 .lingua-nex-panel .lx-ai-holder h2,
-.lingua-nex-panel .lx-ai-holder h3 {
-	margin: 10px 0 6px;
+.lingua-nex-panel .lx-ai-holder h3,
+.lingua-nex-panel .lx-ai-holder h4 {
+	margin: 8px 0 3px;
 	font-size: 15px;
 }
 
@@ -1294,14 +1295,23 @@ body.lingua-nex-panel-open {
 	margin-top: 8px;
 }
 
-.lingua-nex-panel .lx-ai-holder .lx-ai-md p {
-	margin: 4px 0;
+.lingua-nex-panel .lx-ai-holder .lx-ai-md p,
+.lingua-nex-panel .lx-ai-holder .lx-ai-md .markdown-rendered p,
+.lingua-nex-panel .lx-ai-holder .lx-ai-md .markdown-preview-view p {
+	margin: 2px 0;
 }
 
 .lingua-nex-panel .lx-ai-holder .lx-ai-md ul,
-.lingua-nex-panel .lx-ai-holder .lx-ai-md ol {
-	margin: 4px 0;
+.lingua-nex-panel .lx-ai-holder .lx-ai-md ol,
+.lingua-nex-panel .lx-ai-holder .lx-ai-md .markdown-rendered ul,
+.lingua-nex-panel .lx-ai-holder .lx-ai-md .markdown-rendered ol {
+	margin: 2px 0;
 	padding-left: 22px;
+}
+
+.lingua-nex-panel .lx-ai-holder .lx-ai-md li,
+.lingua-nex-panel .lx-ai-holder .lx-ai-md .markdown-rendered li {
+	margin: 1px 0;
 }
 
 .lingua-nex-panel .lx-ai-streaming {

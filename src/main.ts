@@ -562,10 +562,12 @@ export default class LinguaNexPlugin extends Plugin {
 		const id = sourceId ?? YOUDao_SOURCE_ID;
 		if (id === YOUDao_SOURCE_ID) {
 			const e = await this.youdao.query(word);
+			const ce = /[\u4e00-\u9fff]/.test(word);
+			const label = ce ? "有道词典（汉英）" : "有道词典（在线）";
 			return e
 				? {
-						doc: buildOnlineDoc(e, "有道词典（在线）"),
-						sourceName: "有道词典（在线）",
+						doc: buildOnlineDoc(e, label),
+						sourceName: label,
 						audioBr: e.audioBr,
 						audioUs: e.audioUs,
 					}
