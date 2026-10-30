@@ -777,6 +777,8 @@
 .lingua-nex-manager,
 .lingua-nex-review {
 	padding: 12px 16px;
+	/* 底部留白：避免移动端底部工具栏/手势条遮挡算法设置面板与评级按钮 */
+	padding-bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 24px));
 }
 
 .lingua-nex-manager h3,
@@ -1520,9 +1522,6 @@ body.lingua-nex-panel-open {
 	/* anywhere：超长无空格单词在极窄空间也强制断行，不被笔记区挤压遮挡 */
 	overflow-wrap: anywhere;
 }
-.lx-word-line1 .lx-learned {
-	flex: 0 0 auto;
-}
 .lx-word-note-slot {
 	margin-left: auto;
 	flex: 0 0 auto;
@@ -1879,15 +1878,15 @@ body.lingua-nex-panel-open {
 .lx-def-text.hidden {
 	display: none;
 }
-/* 列表模式：已复习过的词显示已学徽章 */
+/* 列表模式：已复习过的词显示已学徽章（独立一行，位于单词下方，不挤压单词） */
 .lx-learned {
+	display: inline-block;
 	font-size: 10.5px;
 	color: var(--lx-accent);
 	border: 1px solid color-mix(in srgb, var(--lx-accent) 55%, transparent);
 	border-radius: 999px;
 	padding: 0 5px;
-	margin-right: 6px;
-	vertical-align: 1px;
+	margin: 3px 0 2px;
 }
 /* 卡片模式：评级后的记忆曲线状态 */
 .lx-review-meta.lx-review-status {

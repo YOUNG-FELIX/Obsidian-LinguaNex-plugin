@@ -470,17 +470,18 @@ export class VocabReviewView extends ItemView {
 					ev.stopPropagation();
 					void this.plugin.speakWord(e.word);
 				});
-				line1.createSpan({ cls: "lx-word", text: e.word });
-				if ((e.reviewCount ?? 0) > 0) {
-					line1.createSpan({ cls: "lx-learned", text: "✓ 已学" });
-				}
-				const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
-				head.createDiv({
-					cls: "lx-word-meta",
-					text:
-						`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
-						`${proficiencyLabel(e)} · ${dueLabel(e)}`,
-				});
+			line1.createSpan({ cls: "lx-word", text: e.word });
+			const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
+			// 「已学」标签放到单词下一行：同行 flex 会挤压单词，把末尾一两个字母挤到下一行
+			if ((e.reviewCount ?? 0) > 0) {
+				head.createSpan({ cls: "lx-learned", text: "✓ 已学" });
+			}
+			head.createDiv({
+				cls: "lx-word-meta",
+				text:
+					`收藏 ${new Date(e.addedAt).toLocaleDateString()} · 复习 ${e.reviewCount} 次 · ` +
+					`${proficiencyLabel(e)} · ${dueLabel(e)}`,
+			});
 				// 列表每行右上角笔记区：预览 2~3 行可滑动，长按/双击进入编辑。
 				// 笔记区进入视口前延迟创建（IntersectionObserver），进一步降低批量挂载成本。
 				noteSlot.addClass("lx-note-pending");
