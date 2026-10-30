@@ -470,12 +470,13 @@ export class VocabReviewView extends ItemView {
 					ev.stopPropagation();
 					void this.plugin.speakWord(e.word);
 				});
-			line1.createSpan({ cls: "lx-word", text: e.word });
-			const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
-			// 「已学」标签放到单词下一行：同行 flex 会挤压单词，把末尾一两个字母挤到下一行
+			// 单词+已学标签放进纵向包裹：标签与单词左对齐（单词正下方），且不挤压单词换行
+			const wordWrap = line1.createDiv({ cls: "lx-word-wrap" });
+			wordWrap.createSpan({ cls: "lx-word", text: e.word });
 			if ((e.reviewCount ?? 0) > 0) {
-				head.createSpan({ cls: "lx-learned", text: "✓ 已学" });
+				wordWrap.createSpan({ cls: "lx-learned", text: "✓ 已学" });
 			}
+			const noteSlot = line1.createDiv({ cls: "lx-word-note-slot" });
 			head.createDiv({
 				cls: "lx-word-meta",
 				text:

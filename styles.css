@@ -1515,12 +1515,17 @@ body.lingua-nex-panel-open {
 	flex: 0 0 auto;
 	margin-right: 2px;
 }
-.lx-word-line1 .lx-word {
-	/* 可收缩：长短语换行，避免把右上角笔记区顶出行外 */
+/* 单词+已学标签的纵向包裹：可收缩，长词在此容器内换行，笔记区不被顶出行外 */
+.lx-word-wrap {
 	flex: 0 1 auto;
 	min-width: 0;
 	/* anywhere：超长无空格单词在极窄空间也强制断行，不被笔记区挤压遮挡 */
 	overflow-wrap: anywhere;
+}
+.lx-word-wrap .lx-word {
+	/* 独占包裹层一行，「已学」标签固定显示在单词正下方 */
+	display: block;
+	margin-right: 0;
 }
 .lx-word-note-slot {
 	margin-left: auto;
