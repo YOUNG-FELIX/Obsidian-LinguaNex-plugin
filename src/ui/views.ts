@@ -1003,7 +1003,13 @@ export class VocabReviewView extends ItemView {
 					day = i - offset + 1;
 				}
 				const cell = grid.createEl("div", { cls: "lx-hm-cell" });
-				if (!isCurMonth) cell.addClass("off");
+				// 非当月占位格：只显示数字、不着色、不可点，
+				// 避免 dateStr 用当前月拼接导致「复用本月同号数据」的错误
+				if (!isCurMonth) {
+					cell.addClass("off");
+					cell.textContent = String(day);
+					continue;
+				}
 				const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 				const stats = daily.get(dateStr);
 				if (stats) {
