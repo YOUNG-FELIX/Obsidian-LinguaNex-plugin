@@ -1517,7 +1517,8 @@ body.lingua-nex-panel-open {
 	/* 可收缩：长短语换行，避免把右上角笔记区顶出行外 */
 	flex: 0 1 auto;
 	min-width: 0;
-	overflow-wrap: break-word;
+	/* anywhere：超长无空格单词在极窄空间也强制断行，不被笔记区挤压遮挡 */
+	overflow-wrap: anywhere;
 }
 .lx-word-line1 .lx-learned {
 	flex: 0 0 auto;
@@ -1712,7 +1713,10 @@ body.lingua-nex-panel-open {
 	margin-bottom: 10px;
 	/* 行内流动，长词自动换行，不被浮动/绝对定位元素遮挡 */
 	max-width: 100%;
-	overflow-wrap: break-word;
+	/* 关键：flex item 默认 min-width:auto 会拒绝收缩，超长单词不换行、溢出被笔记区盖住；
+	   设 0 后配合 overflow-wrap 才能在该行宽度内断行 */
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 /* 卡片单词行：发音按钮内嵌在词前，随行流动不遮挡 */
 .lx-card-wordline {
@@ -1720,6 +1724,8 @@ body.lingua-nex-panel-open {
 	align-items: baseline;
 	gap: 6px;
 	flex-wrap: wrap;
+	/* 右侧让位给右上角绝对定位的笔记区（44% + right 12px），超长单词在此范围内换行，不被盖住 */
+	padding-right: 46%;
 }
 /* 卡片发音按钮：内嵌元素（词前），不再绝对定位 */
 .lx-review-card .lx-card-speak {
@@ -2217,7 +2223,10 @@ body.lingua-nex-panel-open {
 	min-width: 220px;
 	max-width: 280px;
 	max-height: 360px;
-	overflow-y: auto;
+	/* 纵向 flex：head 固定，单词区独立滚动 */
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 	padding: 10px 12px;
 	border-radius: 8px;
 	background: var(--background-primary);
@@ -2225,6 +2234,18 @@ body.lingua-nex-panel-open {
 	box-shadow: 0 8px 24px rgba(0,0,0,0.2);
 	font-size: 13px;
 	line-height: 1.6;
+}
+/* head 模块（日期+统计）：固定，不随单词区滚动 */
+.lx-hm-pop-head {
+	flex: 0 0 auto;
+}
+/* 单词滚动区：数据区外唯一滚动的部分 */
+.lx-hm-pop-scroll {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
 }
 .lx-hm-pop-date {
 	font-weight: 700;

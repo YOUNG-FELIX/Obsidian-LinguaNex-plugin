@@ -316,6 +316,8 @@ export class VocabReviewView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.heatmapCleanup?.();
+		this.heatmapCleanup = null;
 		this.heatmapPopover?.remove();
 		this.heatmapPopover = null;
 	}
@@ -327,6 +329,8 @@ export class VocabReviewView extends ItemView {
 
 	/** 热力图日期面板挂在 body 上，重绘/关闭视图时一并移除，避免节点残留 */
 	private heatmapPopover: HTMLElement | null = null;
+	/** 热力图弹层的滚动/缩放跟随监听的清理函数 */
+	private heatmapCleanup: (() => void) | null = null;
 
 	private mode: "list" | "deck" | "plan" = "list";
 	/** plan 之前的模式：点「复习数据」后切回时恢复 */
@@ -857,6 +861,8 @@ export class VocabReviewView extends ItemView {
 		// 月历格（6 行 × 7 列 = 42 格）
 		const grid = wrap.createDiv({ cls: "lx-hm-grid" });
 
+		this.heatmapCleanup?.();
+		this.heatmapCleanup = null;
 		this.heatmapPopover?.remove();
 		const popover = document.createElement("div");
 		popover.addClass("lx-hm-popover");
@@ -866,7 +872,45 @@ export class VocabReviewView extends ItemView {
 		const closePopover = (): void => {
 			popover.style.display = "none";
 			popover.empty();
+			anchorCell = null;
 		};
+
+		// 弹层智能定位：锚定点击的日期格子，默认放格子下方；下方放不下翻到上方；
+		// 左右始终夹进视口，保证完整可见
+		let anchorCell: HTMLElement | null = null;
+		const positionPopover = (): void => {
+			if (popover.style.display === "none" || !anchorCell) return;
+			const pr = popover.getBoundingClientRect();
+			const cr = anchorCell.getBoundingClientRect();
+			const vw = window.innerWidth;
+			const vh = window.innerHeight;
+			const gap = 4;
+			const pad = 8;
+			// 水平：对齐格子左缘，再夹进视口
+			let left = cr.left;
+			left = Math.max(pad, Math.min(left, vw - pr.width - pad));
+			// 垂直：默认格子下方；放不下且上方空间足够则翻到上方；最终夹进视口
+			let top = cr.bottom + gap;
+			if (top + pr.height > vh - pad && cr.top - pr.height - gap >= pad) {
+				top = cr.top - pr.height - gap;
+			}
+			top = Math.max(pad, Math.min(top, vh - pr.height - pad));
+			popover.style.left = `${Math.round(left)}px`;
+			popover.style.top = `${Math.round(top)}px`;
+		};
+		// 滚动/缩放/软键盘变化时跟随锚点重新定位（scroll 用捕获监听覆盖内部滚动容器）
+		const onFollow = (): void => positionPopover();
+		window.addEventListener("scroll", onFollow, true);
+		window.addEventListener("resize", onFollow);
+		window.visualViewport?.addEventListener("resize", onFollow);
+		window.visualViewport?.addEventListener("scroll", onFollow);
+		this.heatmapCleanup = (): void => {
+			window.removeEventListener("scroll", onFollow, true);
+			window.removeEventListener("resize", onFollow);
+			window.visualViewport?.removeEventListener("resize", onFollow);
+			window.visualViewport?.removeEventListener("scroll", onFollow);
+		};
+
 		wrap.addEventListener("click", (e) => {
 			if (!wrap.contains(e.target as Node)) closePopover();
 		});
@@ -922,11 +966,10 @@ export class VocabReviewView extends ItemView {
 					// 点击弹详情 popover
 					cell.addEventListener("click", () => {
 						closePopover();
-						popover.style.display = "";
-						const r = cell.getBoundingClientRect();
-						popover.style.left = `${Math.min(r.left, window.innerWidth - 260)}px`;
-						popover.style.top = `${r.bottom + 4}px`;
+						anchorCell = cell;
 						this.renderDayPopover(popover, dateStr, stats);
+						popover.style.display = "";
+						positionPopover();
 					});
 				} else {
 					cell.textContent = String(day);
@@ -959,7 +1002,6 @@ export class VocabReviewView extends ItemView {
 
 	private renderDayPopover(pop: HTMLElement, dateStr: string, s: DailyStats): void {
 		pop.empty();
-		pop.createEl("div", { cls: "lx-hm-pop-date", text: dateStr });
 
 		const pct = (part: number, total: number): string =>
 			total === 0 ? "—" : `${Math.round((part / total) * 100)}%`;
@@ -968,16 +1010,21 @@ export class VocabReviewView extends ItemView {
 		const correctRate = s.count > 0
 			? `${pct(s.known + s.fuzzy, s.count)}（认识+模糊计对）` : "—";
 
-		const body = pop.createDiv({ cls: "lx-hm-pop-body" });
+		// head 模块：日期 + 统计数据，固定不随单词区滚动
+		const head = pop.createDiv({ cls: "lx-hm-pop-head" });
+		head.createEl("div", { cls: "lx-hm-pop-date", text: dateStr });
+		const body = head.createDiv({ cls: "lx-hm-pop-body" });
 		body.createEl("div", { text: `总复习次数：${s.count}`, cls: "lx-hm-pop-row" });
 		body.createEl("div", { text: `去重词数：${s.uniqueWords.size}`, cls: "lx-hm-pop-row" });
 		body.createEl("div", { text: `认识 ${s.known} · 模糊 ${s.fuzzy} · 忘记 ${s.forgot}`, cls: "lx-hm-pop-row" });
 		body.createEl("div", { text: `平均熟练度：${avgProf}`, cls: "lx-hm-pop-row" });
 		body.createEl("div", { text: `正确率：${correctRate}`, cls: "lx-hm-pop-row" });
 
+		// 单词区独立滚动，数据区不动
 		if (s.words.length) {
-			pop.createEl("div", { cls: "lx-hm-pop-divider" });
-			const wordBox = pop.createDiv({ cls: "lx-hm-pop-words" });
+			const scroll = pop.createDiv({ cls: "lx-hm-pop-scroll" });
+			scroll.createEl("div", { cls: "lx-hm-pop-divider" });
+			const wordBox = scroll.createDiv({ cls: "lx-hm-pop-words" });
 			for (const w of s.words.slice(0, 30)) {
 				const chip = wordBox.createEl("span", { cls: "lx-hm-chip", text: w });
 				chip.title = `${w}（当日复习 ${s.wordCountMap.get(w)} 次）`;
