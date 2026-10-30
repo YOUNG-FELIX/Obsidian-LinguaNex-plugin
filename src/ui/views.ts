@@ -335,6 +335,8 @@ export class VocabReviewView extends ItemView {
 	private mode: "list" | "deck" | "plan" = "list";
 	/** plan 之前的模式：点「复习数据」后切回时恢复 */
 	private prevMode: "list" | "deck" = "list";
+	/** 模式渲染令牌：await 数据期间快速切换时，旧请求回来即放弃，避免闪动/错乱 */
+	private renderToken = 0;
 	private reviewScope: "due" | "all" = "due";
 	/** 当前复习生词本；为空时回落到默认生词本 */
 	private book = "";
@@ -363,7 +365,7 @@ export class VocabReviewView extends ItemView {
 			});
 			return;
 		}
-		const book = this.book || this.plugin.settings.vocab.defaultBook || books[0];
+		let book = this.book || this.plugin.settings.vocab.defaultBook || books[0];
 		const bar = root.createDiv({ cls: "lx-review-toolbar" });
 		const sel = bar.createEl("select", { cls: "lx-select" });
 		for (const b of books) {
@@ -371,10 +373,11 @@ export class VocabReviewView extends ItemView {
 			opt.selected = b === book;
 		}
 		sel.addEventListener("change", () => {
+			book = sel.value;
 			this.book = sel.value;
 			this.plugin.settings.vocab.defaultBook = sel.value;
 			void this.plugin.saveSettings();
-			this.render();
+			renderMode();
 		});
 		const scopeSel = bar.createEl("select", { cls: "lx-select" });
 		const dueOpt = scopeSel.createEl("option", { text: "到期复习", value: "due" });
@@ -383,7 +386,7 @@ export class VocabReviewView extends ItemView {
 		allOpt.selected = this.reviewScope === "all";
 		scopeSel.addEventListener("change", () => {
 			this.reviewScope = scopeSel.value as "due" | "all";
-			this.render();
+			renderMode();
 		});
 		// 列表/卡片合一按钮：点击在两种复习模式间切换；plan 模式下点击返回原模式
 		const modeBtn = bar.createEl("button", {
@@ -396,18 +399,20 @@ export class VocabReviewView extends ItemView {
 			text: "复习数据",
 		});
 		const body = root.createDiv({ cls: "lx-review-body" });
+		// 渲染令牌：await 数据期间若用户又切换模式/生词本，旧请求回来即放弃，
+		// 由各 render 方法在数据就绪后自行清空重绘，避免「先清空再异步填充」的闪动
 		const renderMode = (): void => {
-			body.empty();
+			const token = ++this.renderToken;
 			if (this.mode === "plan") {
 				modeBtn.setText(`返回：${this.prevMode === "list" ? "列表" : "卡片"}`);
 				planBtn.addClass("on");
-				void this.renderPlan(body, book);
+				void this.renderPlan(body, book, token);
 			} else {
 				modeBtn.setText(this.mode === "list" ? "切换：卡片" : "切换：列表");
 				planBtn.removeClass("on");
 				void (this.mode === "list"
-					? this.renderList(body, book)
-					: this.renderQueue(body, book, this.reviewScope));
+					? this.renderList(body, book, token)
+					: this.renderQueue(body, book, this.reviewScope, token));
 			}
 		};
 		modeBtn.addEventListener("click", () => {
@@ -437,9 +442,11 @@ export class VocabReviewView extends ItemView {
 	 * 全量渲染会卡顿。改为固定高度滚动容器 + 分批渲染（每批 40 条），
 	 * 滚动接近底部时再挂载下一批，打开视图只付首屏成本。
 	 */
-	private async renderList(root: HTMLElement, book: string): Promise<void> {
+	private async renderList(root: HTMLElement, book: string, token: number): Promise<void> {
 		// 按复习算法排序：该复习的在前（已到期/未安排），再按到期时间由近到远
 		const entries = sortByDue(await this.plugin.vocab.entries(book));
+		if (token !== this.renderToken) return;
+		root.empty();
 		if (!entries.length) {
 			root.createEl("p", {
 				text: "生词本为空，查词时点「收藏」即可积累。",
@@ -576,10 +583,13 @@ export class VocabReviewView extends ItemView {
 		root: HTMLElement,
 		book: string,
 		scope: "due" | "all",
+		token: number,
 	): Promise<void> {
 		const entries = scope === "due"
 			? await this.plugin.vocab.dueEntries(book)
 			: await this.plugin.vocab.entries(book);
+		if (token !== this.renderToken) return;
+		root.empty();
 		if (!entries.length) {
 			root.createEl("p", {
 				text: scope === "due"
@@ -696,9 +706,11 @@ export class VocabReviewView extends ItemView {
 	}
 
 	/** 复习数据：按复习日期由近到远展示待复习生词（固定高度可滑动），并汇总数量 */
-	private async renderPlan(root: HTMLElement, book: string): Promise<void> {
+	private async renderPlan(root: HTMLElement, book: string, token: number): Promise<void> {
 		const cfg = this.reviewCfg;
 		const groups = await this.plugin.vocab.schedule(book, cfg.planDays);
+		if (token !== this.renderToken) return;
+		root.empty();
 		if (!groups.length) {
 			root.createEl("p", {
 				text: "生词本为空，暂无复习计划。",
@@ -946,10 +958,16 @@ export class VocabReviewView extends ItemView {
 		});
 
 		const MAX_LEVEL = 4; // 4 档 + 空
+		// 渲染序号：快速连点 ‹/› 时只渲染最后一次，避免旧请求回来覆盖新结果
+		let renderSeq = 0;
 		const render = async (): Promise<void> => {
+			const seq = ++renderSeq;
+			// 先取数据再更新 UI：await 期间网格保持旧内容，
+			// 避免「清空 → await → 填充」造成的空白闪动
+			const daily = await this.plugin.vocab.getDailyStats(book, year, month);
+			if (seq !== renderSeq) return;
 			monthLabel.setText(`${year} 年 ${month + 1} 月`);
 			grid.empty();
-			const daily = await this.plugin.vocab.getDailyStats(book, year, month);
 			// 找最大 count 来定 4 档阈值
 			let maxCount = 0;
 			daily.forEach((s) => { if (s.count > maxCount) maxCount = s.count; });
