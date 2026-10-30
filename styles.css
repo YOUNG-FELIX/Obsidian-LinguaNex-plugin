@@ -777,8 +777,6 @@
 .lingua-nex-manager,
 .lingua-nex-review {
 	padding: 12px 16px;
-	/* 底部留白：避免移动端底部工具栏/手势条遮挡算法设置面板与评级按钮 */
-	padding-bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 24px));
 }
 
 .lingua-nex-manager h3,
@@ -2108,6 +2106,21 @@ body.lingua-nex-panel-open {
 	display: flex;
 	gap: 8px;
 	justify-content: flex-end;
+}
+/* 底部励志语 + 留白：既是鼓励，也为移动端底部工具栏留出呼吸空间 */
+.lx-footer {
+	margin-top: 16px;
+	padding: 12px 14px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	text-align: center;
+	/* 留白区域：确保励志语与上方参数设置/评级按钮不被移动端底部工具栏遮挡 */
+	margin-bottom: max(64px, calc(env(safe-area-inset-bottom, 0px) + 56px));
+}
+.lx-footer-text {
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--text-muted);
 }
 
 /* 设置页词典管理：在线翻译说明段下边距（审查 no-static-styles-assignment 修复） */

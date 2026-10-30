@@ -567,6 +567,8 @@ export class VocabReviewView extends ItemView {
 		});
 		// 列表底部：折叠的算法参数设置（可配置复习计划与参数）
 		this.renderAlgoSettings(root);
+		// 底部励志语 + 留白：既是鼓励，也避免参数设置被移动端底部工具栏遮挡
+		void this.renderFooter(root, book);
 	}
 
 	/** 卡片复习模式：SM-2 评级；释义默认隐藏，点按钮展开后可切换本地/有道/AI 源 */
@@ -689,6 +691,8 @@ export class VocabReviewView extends ItemView {
 		hard.addEventListener("click", () => void grade(1));
 		good.addEventListener("click", () => void grade(2));
 		void show(0);
+		// 卡片模式底部励志语 + 留白，评级按钮不被移动端底部工具栏遮挡
+		void this.renderFooter(root, book);
 	}
 
 	/** 复习数据：按复习日期由近到远展示待复习生词（固定高度可滑动），并汇总数量 */
@@ -728,6 +732,8 @@ export class VocabReviewView extends ItemView {
 		await this.renderHeatmap(root, book);
 		// 复习数据面板底部：折叠的算法参数设置（可直接展开改参）
 		this.renderAlgoSettings(root);
+		// 底部励志语 + 留白：既是鼓励，也避免参数设置被移动端底部工具栏遮挡
+		void this.renderFooter(root, book);
 	}
 
 	/** 算法参数设置：折叠面板，按 SM-2 算法可调参数配置复习计划 */
@@ -804,6 +810,28 @@ export class VocabReviewView extends ItemView {
 			this.plugin.toast.show("已恢复默认复习参数", { key: "lx-algo" });
 			this.render();
 		});
+	}
+
+	/** 页面底部励志语：展示今日复习进度 + 鼓励，同时为移动端底部工具栏留出呼吸空间 */
+	private async renderFooter(root: HTMLElement, book: string): Promise<void> {
+		const now = new Date();
+		const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+		const daily = await this.plugin.vocab.getDailyStats(book, now.getFullYear(), now.getMonth());
+		const st = daily.get(today);
+		const foot = root.createDiv({ cls: "lx-footer" });
+		const text = foot.createDiv({ cls: "lx-footer-text" });
+		if (st && st.count > 0) {
+			const praises = [
+				"坚持就是胜利",
+				"积少成多，量变终成质变",
+				"每一步都算数",
+				"今天的你比昨天更强",
+			];
+			const p = praises[Math.floor(Math.random() * praises.length)];
+			text.setText(`📖 今日已复习 ${st.count} 次 · ${st.uniqueWords.size} 词，${p}。`);
+		} else {
+			text.setText("🌱 今天还没开始复习，从 3 个词开始，也是进步。");
+		}
 	}
 
 	/** 复习热力图：月历 + 每日详情 popover */
