@@ -493,6 +493,33 @@
 	font-size: 13px;
 	padding: 2px 5px;
 }
+/* ---------- 笔记内容预览（📝 左侧单行，超长可滑动 + 自动滚动） ---------- */
+.lingua-nex-panel .lx-note-preview {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+	-webkit-overflow-scrolling: touch;
+	font-size: 11px;
+	line-height: 1.5;
+	color: var(--text-muted);
+	padding: 1px 2px;
+	margin-right: 4px;
+	cursor: pointer;
+	user-select: text;
+	-webkit-user-select: text;
+}
+.lingua-nex-panel .lx-note-preview::-webkit-scrollbar {
+	display: none;
+}
+.lingua-nex-panel .lx-note-preview-text {
+	white-space: nowrap;
+	display: inline-block;
+}
+.lingua-nex-panel .lx-note-preview.empty {
+	color: var(--text-faint);
+	font-style: italic;
+}
 /* ---------- 笔记入口（底部行 ‹ › 左侧） ---------- */
 .lingua-nex-panel .lx-note-wrap {
 	position: relative;

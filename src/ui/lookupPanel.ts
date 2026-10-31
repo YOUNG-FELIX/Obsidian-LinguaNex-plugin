@@ -100,6 +100,13 @@ export class LookupPanel {
 	private notePopOpen = false;
 	/** 展开笔记浮层时归属的单词：换词即自动收起，避免笔记写串词 */
 	private noteWordAtOpen = "";
+	/** 笔记入口左侧的一行内容预览：展示当前词已有笔记，过长可横向滑动/自动滚动 */
+	private notePreview: HTMLElement | null = null;
+	private notePreviewText: HTMLElement | null = null;
+	/** 预览自动滚动定时器与当前归属词（防异步竞态覆盖） */
+	private noteMarqueeTimer: number | null = null;
+	private noteMarqueeResume: number | null = null;
+	private notePreviewWord = "";
 	private aiContext: ChatMessage[] = [];
 	private mdComp: Component | null = null;
 	/** AI 释义缓存：key = 源|单词|提示词，value = 已生成的 Markdown；面板未关闭前切换源复用，不重复请求 */
@@ -202,6 +209,15 @@ export class LookupPanel {
 			attr: { placeholder: "搜索…", spellcheck: "false" },
 		});
 		const row2 = this.statusEl.createDiv({ cls: "lx-status-row lx-status-row2" });
+		// 笔记内容预览：占满 ‹ › 左侧空白，单行展示当前词笔记，过长可滑动/自动滚动
+		this.notePreview = row2.createDiv({ cls: "lx-note-preview empty" });
+		this.notePreviewText = this.notePreview.createSpan({ cls: "lx-note-preview-text" });
+		this.notePreview.addEventListener("click", () => void this.toggleNotePop());
+		// 交互时暂停自动滚动，松手/离开后延时恢复，手动滑动与自动滚动不打架
+		this.notePreview.addEventListener("pointerdown", () => this.pauseNoteMarquee());
+		this.notePreview.addEventListener("pointerup", () => this.scheduleNoteMarquee());
+		this.notePreview.addEventListener("pointercancel", () => this.scheduleNoteMarquee());
+		this.notePreview.addEventListener("pointerleave", () => this.scheduleNoteMarquee());
 		// 笔记入口：与左右切换 ‹ › 同一行、位于其左侧；展开用浮层，不撑大底部状态栏
 		const noteWrap = row2.createDiv({ cls: "lx-note-wrap" });
 		this.noteBtn = noteWrap.createEl("button", {
@@ -1174,6 +1190,8 @@ export class LookupPanel {
 	private syncInputs(w: string): void {
 		this.input.value = w;
 		this.searchMini.value = w;
+		// 词变更即刷新 📝 预览，保证预览始终对应当前词
+		void this.refreshNotePreview(w);
 	}
 
 	private renderIframe(doc: string): void {
@@ -1316,6 +1334,87 @@ export class LookupPanel {
 		return (this.input.value.trim() || this.currentWord()).trim();
 	}
 
+	/** 刷新 📝 左侧的笔记一行预览：有笔记显示内容，无笔记显示淡色占位 */
+	private async refreshNotePreview(word: string): Promise<void> {
+		const w = word.trim();
+		if (!this.notePreview || !this.notePreviewText) return;
+		this.notePreviewWord = w;
+		this.stopNoteMarquee();
+		if (!w) {
+			this.notePreviewText.textContent = "";
+			this.notePreview.classList.add("empty");
+			this.notePreview.title = "";
+			return;
+		}
+		const note = await this.plugin.loadNote(w);
+		// 异步返回时可能已切到别的词，旧结果直接丢弃
+		if (this.notePreviewWord !== w) return;
+		const flat = note.replace(/\s+/g, " ").trim();
+		if (flat) {
+			this.notePreviewText.textContent = flat;
+			this.notePreview.classList.remove("empty");
+			this.notePreview.title = flat;
+		} else {
+			this.notePreviewText.textContent = "暂无笔记";
+			this.notePreview.classList.add("empty");
+			this.notePreview.title = "";
+		}
+		this.restartNoteMarquee();
+	}
+
+	/** 停止预览自动滚动 */
+	private stopNoteMarquee(): void {
+		if (this.noteMarqueeTimer != null) {
+			window.clearInterval(this.noteMarqueeTimer);
+			this.noteMarqueeTimer = null;
+		}
+		if (this.noteMarqueeResume != null) {
+			window.clearTimeout(this.noteMarqueeResume);
+			this.noteMarqueeResume = null;
+		}
+	}
+
+	/** 交互中暂停自动滚动（保留 resume 定时器逻辑由 scheduleNoteMarquee 接管） */
+	private pauseNoteMarquee(): void {
+		if (this.noteMarqueeTimer != null) {
+			window.clearInterval(this.noteMarqueeTimer);
+			this.noteMarqueeTimer = null;
+		}
+	}
+
+	/** 松手/离开后延时恢复自动滚动 */
+	private scheduleNoteMarquee(): void {
+		if (this.noteMarqueeResume != null) window.clearTimeout(this.noteMarqueeResume);
+		this.noteMarqueeResume = window.setTimeout(() => {
+			this.noteMarqueeResume = null;
+			this.restartNoteMarquee();
+		}, 1500);
+	}
+
+	/** 内容超出预览宽度时启动缓慢来回滚动；不超宽则停住不动 */
+	private restartNoteMarquee(): void {
+		this.stopNoteMarquee();
+		const wrap = this.notePreview;
+		const text = this.notePreviewText;
+		if (!wrap || !text) return;
+		wrap.scrollLeft = 0;
+		const overflow = text.scrollWidth - wrap.clientWidth;
+		if (overflow <= 0) return;
+		let pos = 0;
+		let dir = 1;
+		this.noteMarqueeTimer = window.setInterval(() => {
+			pos += dir * 0.5;
+			if (pos >= overflow) {
+				pos = overflow;
+				dir = -1;
+			} else if (pos <= 0) {
+				pos = 0;
+				dir = 1;
+			}
+			wrap.scrollLeft = pos;
+		}, 24);
+	}
+
 	/** 展开/收起笔记浮层 */
 	private async toggleNotePop(): Promise<void> {
 		if (this.notePopOpen) {
@@ -1402,6 +1501,7 @@ export class LookupPanel {
 			this.noteHint.setText("已保存");
 			this.noteHint.removeClass("warn");
 		}
+		void this.refreshNotePreview(w);
 	}
 
 	/** 追问条向上滑出：仅在 AI 释义内容生成结束后调用，避免生成过程中一直占着底部空间 */
@@ -1774,6 +1874,8 @@ export class LookupPanel {
 			this.setStatus(`已收藏：${w}`);
 		}
 		await this.refreshFavState(w);
+		// 收藏/取消收藏都会改变笔记可读状态，刷新预览
+		void this.refreshNotePreview(w);
 	}
 
 	dispose(): void {
@@ -1787,6 +1889,7 @@ export class LookupPanel {
 		}
 		window.removeEventListener("resize", this.onWinResizeEv);
 		this.stopKbPoll();
+		this.stopNoteMarquee();
 		if (this.statusClearTimer != null) {
 			window.clearTimeout(this.statusClearTimer);
 			this.statusClearTimer = null;
